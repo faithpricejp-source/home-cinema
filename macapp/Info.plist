@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Home Cinema</string>
+  <key>CFBundleDisplayName</key><string>Home Cinema</string>
+  <key>CFBundleIdentifier</key><string>io.github.homecinema</string>
+  <key>CFBundleExecutable</key><string>HomeCinema</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key>
+  <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+  <key>HCProjectRoot</key><string>__PROJECT_ROOT__</string>
+  <key>NSHumanReadableCopyright</key><string>元数据与图片来自 TMDB。本产品使用 TMDB API 但未经 TMDB 认证。</string>
+</dict>
+</plist>

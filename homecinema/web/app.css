@@ -1,0 +1,470 @@
+/* HomeCinema · 深色 Claude 风格 */
+
+:root {
+  --bg: #1F1E1D;
+  --panel: #2B2A27;
+  --raised: #353430;
+  --text: #ECEAE3;
+  --muted: #A6A39A;
+  --accent: #D97757;
+  --accent-hover: #E08A6D;
+  --divider: rgba(236, 234, 227, 0.08);
+  --serif: ui-serif, "New York", "Songti SC", Georgia, serif;
+  --sans: -apple-system, "PingFang SC", system-ui, sans-serif;
+  --radius: 12px;
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  --speed: 180ms;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+a { color: inherit; text-decoration: none; }
+img { display: block; }
+
+/* ---------- 顶栏 ---------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(31, 30, 29, 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--divider);
+}
+
+.topbar-inner {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 14px 40px;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.brand {
+  font-family: var(--serif);
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+
+.nav { display: flex; gap: 4px; }
+
+.nav a {
+  padding: 6px 14px;
+  border-radius: 999px;
+  color: var(--muted);
+  transition: color var(--speed) ease, background var(--speed) ease;
+}
+
+.nav a:hover { color: var(--text); background: var(--panel); }
+.nav a.active { color: var(--text); background: var(--raised); }
+
+.tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#search {
+  width: 240px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--divider);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--speed) ease, background var(--speed) ease;
+}
+
+#search:focus { border-color: var(--accent); background: var(--raised); }
+#search::placeholder { color: var(--muted); }
+
+/* ---------- 按钮 ---------- */
+
+.btn {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 9px 18px;
+  font-size: 14px;
+  font-family: var(--sans);
+  cursor: pointer;
+  transition: background var(--speed) ease, border-color var(--speed) ease,
+              color var(--speed) ease, transform var(--speed) ease;
+}
+
+.btn:active { transform: translateY(1px); }
+
+.btn.primary {
+  background: var(--accent);
+  color: #1F1E1D;
+  font-weight: 600;
+}
+
+.btn.primary:hover { background: var(--accent-hover); }
+
+.btn.ghost {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--divider);
+}
+
+.btn.ghost:hover { background: var(--raised); border-color: rgba(236, 234, 227, 0.18); }
+
+.btn.ghost:disabled { color: var(--muted); cursor: default; }
+
+/* ---------- 版式 ---------- */
+
+.view {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 28px 40px 64px;
+}
+
+.section { margin-top: 36px; }
+.section:first-child { margin-top: 8px; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.section-head h2 {
+  font-family: var(--serif);
+  font-size: 21px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.section-head .count { color: var(--muted); font-size: 13px; }
+.section-head .spacer { flex: 1; }
+
+select.sort {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.empty { color: var(--muted); padding: 24px 0; }
+
+/* ---------- 海报墙 ---------- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 22px 18px;
+}
+
+/* min-width:0：否则长片名（nowrap）会把卡片撑宽，海报按 2:3 跟着变高 */
+.card { display: block; min-width: 0; }
+
+.card .poster {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  height: auto;
+  object-fit: cover;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 2px solid transparent;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  transition: transform var(--speed) ease, border-color var(--speed) ease,
+              box-shadow var(--speed) ease;
+}
+
+.card:hover .poster {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+}
+
+.card-t {
+  margin-top: 9px;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-s { color: var(--muted); font-size: 12.5px; }
+
+.poster.ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.poster.ph span {
+  font-family: var(--serif);
+  font-size: 52px;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+/* ---------- 横排 ---------- */
+
+.row {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+}
+
+.row .card { flex: 0 0 150px; }
+
+/* ---------- 继续观看 ---------- */
+
+.cw-card {
+  position: relative;
+  flex: 0 0 430px;
+  height: 220px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--divider);
+  transition: transform var(--speed) ease, border-color var(--speed) ease;
+}
+
+.cw-card:hover { transform: translateY(-3px); border-color: var(--accent); }
+
+.cw-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cw-card.ph-bg { background: var(--raised); }
+
+.cw-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(31, 30, 29, 0.05) 30%, rgba(31, 30, 29, 0.88) 100%);
+}
+
+.cw-meta {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 14px 16px;
+}
+
+.cw-title {
+  font-family: var(--serif);
+  font-size: 17px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cw-title .dim { color: var(--muted); font-family: var(--sans); font-size: 13px; }
+
+.cw-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+.bar {
+  margin-top: 9px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(236, 234, 227, 0.16);
+  overflow: hidden;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* ---------- 详情页 ---------- */
+
+.hero {
+  position: relative;
+  height: 400px;
+  margin: -28px -40px 0;
+  overflow: hidden;
+}
+
+.hero img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero-fade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(31, 30, 29, 0.25) 0%, rgba(31, 30, 29, 0.55) 55%, var(--bg) 100%);
+}
+
+.hero.ph-hero { background: var(--panel); }
+
+.detail-body {
+  position: relative;
+  display: flex;
+  gap: 36px;
+  margin-top: -150px;
+  padding: 0 40px 8px;
+}
+
+.detail-poster .poster { width: 220px; box-shadow: var(--shadow); }
+
+.detail-info { flex: 1; min-width: 0; padding-top: 24px; }
+
+.detail-info h1 {
+  font-family: var(--serif);
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+
+.meta-line { color: var(--muted); font-size: 14.5px; margin-bottom: 14px; }
+.meta-line .dot { margin: 0 8px; opacity: 0.5; }
+.meta-line .star { color: var(--accent); }
+
+.overview {
+  max-width: 720px;
+  color: var(--text);
+  opacity: 0.92;
+  font-size: 15px;
+  margin: 0 0 22px;
+  white-space: pre-wrap;
+}
+
+.actions { display: flex; gap: 12px; align-items: center; }
+
+.actions .btn.primary { padding: 11px 26px; font-size: 15px; }
+
+/* ---------- 剧集 ---------- */
+
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 26px 0 14px; }
+
+.tab {
+  padding: 7px 18px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--divider);
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: all var(--speed) ease;
+}
+
+.tab:hover { color: var(--text); background: var(--raised); }
+.tab.active {
+  color: #1F1E1D;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.ep-list { display: flex; flex-direction: column; gap: 10px; }
+
+.ep-row {
+  display: grid;
+  grid-template-columns: 168px 1fr auto;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 14px 10px 10px;
+  background: var(--panel);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background var(--speed) ease, border-color var(--speed) ease;
+}
+
+.ep-row:hover { background: var(--raised); border-color: var(--accent); }
+
+.ep-thumb {
+  width: 168px;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--raised);
+}
+
+.ep-thumb.ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif);
+  font-size: 24px;
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+.ep-name { font-size: 15px; }
+.ep-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.ep-row .bar { max-width: 360px; }
+.ep-side { color: var(--muted); font-size: 13px; text-align: right; }
+
+.check {
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+/* ---------- 页脚 / 提示 ---------- */
+
+.footer {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 20px 40px 30px;
+  color: var(--muted);
+  font-size: 12.5px;
+  border-top: 1px solid var(--divider);
+}
+
+.footer a { color: var(--muted); text-decoration: underline; }
+.footer a:hover { color: var(--text); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%) translateY(16px);
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius);
+  padding: 11px 20px;
+  font-size: 14px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--speed) ease, transform var(--speed) ease;
+  z-index: 50;
+  max-width: 80vw;
+}
+
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.error { color: var(--accent); padding: 32px 0; }
+
+.loading { color: var(--muted); padding: 32px 0; }
+
+@media (max-width: 900px) {
+  .topbar-inner, .view, .footer { padding-left: 20px; padding-right: 20px; }
+  .hero { margin: -28px -20px 0; }
+  .detail-body { flex-direction: column; padding: 0 20px; }
+  .cw-card { flex-basis: 340px; }
+}

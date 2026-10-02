@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HomeCinema</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#/">HomeCinema</a>
+    <nav class="nav" id="nav">
+      <a href="#/" data-nav="home">首页</a>
+      <a href="#/movies" data-nav="movies">电影</a>
+      <a href="#/shows" data-nav="shows">剧集</a>
+    </nav>
+    <div class="tools">
+      <input id="search" type="search" placeholder="搜索片名…" autocomplete="off" spellcheck="false">
+      <button id="rescan" class="btn ghost" type="button">重新扫描</button>
+    </div>
+  </div>
+</header>
+<main id="view" class="view"></main>
+<footer class="footer">
+  HomeCinema · 元数据与图片来自 <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>，本产品使用 TMDB API 但未经 TMDB 认证。
+</footer>
+<div id="toast" class="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

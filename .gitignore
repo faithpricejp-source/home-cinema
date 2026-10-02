@@ -1,0 +1,8 @@
+.venv/
+config.toml
+__pycache__/
+.pytest_cache/
+.DS_Store
+.mimosa/
+logs/
+build/

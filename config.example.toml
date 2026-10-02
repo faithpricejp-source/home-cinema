@@ -1,0 +1,8 @@
+movie_roots = ["/path/to/Movie"]
+tv_roots = ["/path/to/TV/已完结", "/path/to/TV/未完结"]
+db_path = "~/Library/Application Support/HomeCinema/library.db"
+cache_dir = "~/Library/Caches/HomeCinema"
+tmdb_key_file = "~/.config/tmdb/api-key.txt"
+tmdb_language = "zh-CN"
+port = 8770
+iina_cli = "/Applications/IINA.app/Contents/MacOS/iina-cli"
