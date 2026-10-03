@@ -433,6 +433,10 @@ class Library:
                 continue
             ep, _source = pair
             pb = self.get_playback("episode", ep["id"])
+            # 排序按这部剧最近一次播放活动：「该看下一集」的卡片下一集还没有 playback，
+            # 不能拿它的 updated_at（None 会让追剧卡永远沉底）
+            with self._lock:
+                last = self._conn.execute("SELECT MAX(p.updated_at) FROM playback p JOIN episodes e ON p.item_type='episode' AND p.item_id=e.id WHERE e.show_id=?", (show["id"],)).fetchone()[0]
             position = pb["position_sec"] if pb else 0.0
             duration = pb["duration_sec"] if pb else None
             watched = bool(pb and pb["watched"])
@@ -446,7 +450,7 @@ class Library:
                 "position_sec": position, "duration_sec": duration,
                 "watched": watched,
                 "progress": 1.0 if watched else _progress(position, duration),
-                "updated_at": pb["updated_at"] if pb else None,
+                "updated_at": last,
                 "href": f"#/show/{show['id']}",
             })
         items.sort(key=lambda x: x["updated_at"] or "", reverse=True)

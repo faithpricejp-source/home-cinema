@@ -126,6 +126,21 @@ libmpv 初始化失败（如 dylib 被改名/损坏、render context 创建失�
 - 每季做完立即落库：中途中断后重跑会跳过已完成的季。
 - 调 `GET /api/segments?episode_id=N` 可查看某一集的识别结果（调试用）。
 
+片尾还有一层**画面文字识别**补漏和复核（声纹认不出每集配乐不同的片尾，也会偏早或偏晚）：
+
+```bash
+.venv/bin/pip install pyobjc-framework-Vision pyobjc-framework-Quartz pillow
+.venv/bin/python tools/ocr_extract_batch.py        # 每集最后 5 分钟每 2 秒截一帧，macOS Vision 数文字，特征缓存可续跑
+.venv/bin/python tools/apply_ocr_credits.py        # 预览会改哪些集；加 --write 落库
+```
+
+- 判定（`homecinema/ocr_credits.py`）：黑底、至少两行字、不是整句话、不是台标的帧算演职员表，
+  取有字帧最多且结束在片尾 90 秒内的那一块的起点。
+- 合并：原来没片尾的直接补；原值是纯声纹且与文字识别差 10 秒以上时改用文字识别；
+  原值含章节标注时只允许往后挪（宁晚勿早，片尾一到就跳下一集）。
+- 文字识别仍认不出的（演职员表叠在画面上），`tools/vlm_credits.py batch` 把最后 5 分钟拼成缩略图，
+  交给视觉模型判断剧情在哪一帧结束（脚本里接的是一个 OpenAI 兼容端点，按需替换）。
+
 App 菜单「显示 → 跳过片头片尾」是总开关（默认开，记在 UserDefaults 的 `skipIntroOutro`）。
 跳过片头时画面提示「已跳过片头 · 按 ← 回看」，手动往回拖进片头不会再被跳；关掉开关时，
 正在播放的这一集立即停止跳过。

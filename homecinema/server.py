@@ -400,8 +400,12 @@ def create_app(config: Config | None = None, db: Library | None = None,
                 "episodes": [_episode_payload(ep) for ep in by_season[sn]],
             })
         next_up = db.next_up_for_show(show_id)
+        present = [ep for ep in episodes if not ep["missing"]]
         return {
             **_show_payload(row, detail=True),
+            # get_show 是 SELECT * FROM shows，没有列表接口子查询算的这两列
+            "episode_count": len(present),
+            "watched_count": sum(1 for ep in present if _row_value(ep, "watched", 0)),
             "seasons": seasons,
             "next_episode": _episode_payload(next_up[0]) if next_up else None,
         }
@@ -443,6 +447,8 @@ def create_app(config: Config | None = None, db: Library | None = None,
 
     @app.post("/api/watched")
     def watched(body: WatchedBody):
+        if body.type not in ("movie", "episode"):
+            raise HTTPException(status_code=422, detail="type 必须是 movie 或 episode")
         if not db.set_watched(body.type, body.id, body.watched):
             raise HTTPException(status_code=404, detail="条目不存在")
         return {"ok": True}
@@ -488,10 +494,10 @@ def create_app(config: Config | None = None, db: Library | None = None,
     @app.get("/img/{name}")
     def image(name: str):
         images = config.images_dir
-        path = (images / name).resolve()
         try:
+            path = (images / name).resolve()  # 含空字节等非法名会抛 ValueError
             path.relative_to(images.resolve())
-        except ValueError:
+        except (ValueError, OSError):
             raise HTTPException(status_code=404, detail="图片不存在")
         if not path.is_file():
             raise HTTPException(status_code=404, detail="图片不存在")
