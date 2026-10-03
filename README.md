@@ -1,5 +1,7 @@
 # Home Cinema · 本机影音库
 
+[English](README.en.md)
+
 A local, Infuse-style media library app for macOS: scans your movie / TV folders, fetches posters and overviews from TMDB, shows a dark poster wall, and plays everything in-app via libmpv — with resume, "continue watching", auto next episode, and automatic intro / end-credits skipping for TV shows.
 
 只在本机（macOS）用的类 Infuse 影音库：扫描本地电影、剧集目录 → 从 TMDB 拉海报和简介 → 深色海报墙 → 在 App 窗口里用 libmpv 播放，记进度、继续观看、剧集自动下一集、电视剧自动跳过片头片尾。
@@ -62,12 +64,13 @@ iina_cli = "/Applications/IINA.app/Contents/MacOS/iina-cli"
 - 电影文件夹里可放 `.nfo`（含 `<tmdbid>` 则直接用该 id，不再搜索）、
   `poster.jpg` / `folder.jpg` / 与视频同名的 `.jpg`/`.png`（本地海报优先于 TMDB）、`.srt`/`.ass` 字幕（IINA 自动加载）。
 
-## 运行（三条命令）
+## 运行
 
 ```bash
 .venv/bin/python -m homecinema scan             # 扫描片库入库（增量；消失的文件标 missing，进度保留）
 .venv/bin/python -m homecinema fetch-metadata   # 拉 TMDB 元数据、下载海报/剧照到缓存
 .venv/bin/python -m homecinema serve            # 启动网页服务，浏览器开 http://127.0.0.1:8770
+.venv/bin/python -m homecinema recommend        # 可选：按片库和观看记录生成「推荐」页（需要 TMDB key）
 ```
 
 也可以在网页右上角点「重新扫描」（后台跑 scan + 补元数据，按钮上显示进度）。
@@ -76,7 +79,7 @@ iina_cli = "/Applications/IINA.app/Contents/MacOS/iina-cli"
 
 - 首页：继续观看（宽卡片带进度条）、最近添加、电影/剧集海报墙。
 - 点「播放/继续播放」→ 调 `iina-cli` 打开；后台每 5 秒经 mpv IPC 记进度。
-- 看过 90%（或剩余 <3 分钟）自动标已看；下次从头播。
+- 看过 90%（或剩余 <3 分钟，仅对 10 分钟以上的片子）自动标已看；下次从头播。
 - 没看完再点播放，从上次位置继续；位置 <30 秒当作没看过。
 - 剧集详情页可切季、点任意一集播放；顶部「继续：SxxExx」直达下一集。
 
@@ -93,7 +96,7 @@ iina_cli = "/Applications/IINA.app/Contents/MacOS/iina-cli"
 - ← / →：快退/快进 5 秒；↑ / ↓：快退/快进 1 分钟
 - m：静音；j：切字幕轨；#：切音轨
 - `[` / `]`：减速/加速播放；滚轮：快退/快进
-- f：窗口全屏（走 App 菜单）；q：结束播放
+- f：窗口全屏（由 App 切窗口，不走 mpv 全屏）
 - ESC：全屏时先退全屏，再按一次结束播放回到海报墙
 - 鼠标移动唤出 OSC 控制条，可点按钮、拖进度条
 
@@ -118,7 +121,7 @@ libmpv 初始化失败（如 dylib 被改名/损坏、render context 创建失�
 ```
 
 - 章节优先：每集先用 `ffprobe` 取章节，能定出片头/片尾就用章节结果（`source='chapters'`）。
-- 其余集用声纹整季比对（`source='fingerprint'`）：片头取开头 `min(600, 时长×0.35)` 秒，
+- 同季各集再用声纹整季比对，补上章节没给出的那一段（纯声纹记 `source='fingerprint'`，章节加声纹记 `source='chapters+fingerprint'`，章节已有的值不覆盖）：片头取开头 `min(600, 时长×0.35)` 秒，
   片尾取最后 300 秒；一季只有 1 集时跳过声纹。两者都没有的记 `source='none'`。
 - 每季做完立即落库：中途中断后重跑会跳过已完成的季。
 - 调 `GET /api/segments?episode_id=N` 可查看某一集的识别结果（调试用）。
