@@ -65,7 +65,7 @@ function posterHTML(item, cls) {
 }
 
 function cardHTML(item, sub) {
-  return '<a class="card" href="' + item.href + '">' + posterHTML(item) +
+  return '<a class="card" href="' + esc(item.href) + '">' + posterHTML(item) +
     '<div class="card-t">' + esc(item.title) + "</div>" +
     (sub ? '<div class="card-s">' + esc(sub) + "</div>" : "") + "</a>";
 }
@@ -87,6 +87,24 @@ function loadingHTML() { return '<div class="loading">加载中…</div>'; }
 
 function errorHTML(err) { return '<div class="error">出错了：' + esc(err.message) + "</div>"; }
 
+/* 每次渲染领一个代次：请求回来时代次已变，说明用户已经切走，旧结果直接丢弃，
+   免得慢的旧请求盖掉新页面。请求失败显示错误，不停在「加载中…」。 */
+let viewGen = 0;
+async function fetchView(url) {
+  const g = ++viewGen;
+  $view.innerHTML = loadingHTML();
+  let d;
+  try {
+    d = await apiCall("GET", url);
+  } catch (err) {
+    if (g === viewGen) $view.innerHTML = errorHTML(err);
+    return null;
+  }
+  if (g !== viewGen) return null;
+  if (d == null) { $view.innerHTML = errorHTML(new Error("服务器返回了空响应")); return null; }
+  return d;
+}
+
 /* ---------- 首页 ---------- */
 
 function continueCardHTML(item) {
@@ -100,7 +118,7 @@ function continueCardHTML(item) {
       "E" + pad(item.episode_number) + "</span>";
     sub = esc(item.title);
   }
-  return '<a class="cw-card' + (bg ? "" : " ph-bg") + '" href="' + item.href + '">' +
+  return '<a class="cw-card' + (bg ? "" : " ph-bg") + '" href="' + esc(item.href) + '">' +
     (bg ? '<img class="cw-bg" src="' + bg + '" alt="">' : "") +
     '<div class="cw-shade"></div>' +
     '<div class="cw-meta"><div class="cw-title">' + title + '</div>' +
@@ -113,8 +131,8 @@ function sectionHTML(head, inner) {
 }
 
 async function renderHome() {
-  $view.innerHTML = loadingHTML();
-  const d = await apiCall("GET", "/api/home");
+  const d = await fetchView("/api/home");
+  if (!d) return;
   const parts = [];
 
   const cw = d.continue_watching.map(continueCardHTML).join("");
@@ -142,13 +160,13 @@ async function renderHome() {
 /* ---------- 列表页 ---------- */
 
 async function renderList() {
-  $view.innerHTML = loadingHTML();
   const kind = window.location.hash.startsWith("#/shows") ? "shows" : "movies";
   const label = kind === "movies" ? "电影" : "剧集";
   const params = new URLSearchParams();
   if (state.q) params.set("q", state.q);
   params.set("sort", state.sort);
-  const items = await apiCall("GET", `/api/${kind}?${params}`);
+  const items = await fetchView(`/api/${kind}?${params}`);
+  if (!items) return;
   const cards = items.map((it) => {
     const sub = kind === "shows"
       ? (it.episode_count ? "已看 " + it.watched_count + " / " + it.episode_count : "")
@@ -174,12 +192,12 @@ async function renderMovie() {
   const raw = (window.location.hash.match(/^#\/movie\/([0-9]{1,10})$/) || [])[1];
   const id = parseInt(raw, 10);
   if (!Number.isInteger(id) || id <= 0) { window.location.hash = "#/"; return; }
-  $view.innerHTML = loadingHTML();
-  const m = await apiCall("GET", "/api/movie/" + id);
+  const m = await fetchView("/api/movie/" + id);
+  if (!m) return;
   const bg = imgUrl(m.backdrop) || imgUrl(m.poster);
   const metaBits = [];
-  if (m.year) metaBits.push(m.year);
-  if (m.runtime_minutes) metaBits.push(m.runtime_minutes + " 分钟");
+  if (m.year) metaBits.push(esc(m.year));
+  if (m.runtime_minutes) metaBits.push(esc(m.runtime_minutes) + " 分钟");
   if (m.genres && m.genres.length) metaBits.push(esc(m.genres.join(" / ")));
   if (m.rating != null && m.rating > 0) metaBits.push('<span class="star">★</span> ' + m.rating.toFixed(1));
   if (m.status === "unmatched") metaBits.push("未匹配到元数据");
@@ -217,7 +235,7 @@ function epRowHTML(ep) {
   const thumb = imgUrl(ep.still);
   const label = "S" + pad(ep.season_number) + "E" + pad(ep.episode_number);
   const side = ep.watched ? '<span class="check">✓</span>' : (ep.runtime_minutes ? ep.runtime_minutes + " 分钟" : "");
-  return '<div class="ep-row" data-ep="' + ep.id + '">' +
+  return '<div class="ep-row" role="button" tabindex="0" data-ep="' + esc(ep.id) + '">' +
     (thumb ? '<img class="ep-thumb" loading="lazy" src="' + thumb + '" alt="">'
            : '<div class="ep-thumb ph"><span>' + pad(ep.episode_number) + "</span></div>") +
     '<div><div class="ep-name">' + esc(ep.title) + "</div>" +
@@ -231,14 +249,14 @@ async function renderShow() {
   const raw = (window.location.hash.match(/^#\/show\/([0-9]{1,10})$/) || [])[1];
   const id = parseInt(raw, 10);
   if (!Number.isInteger(id) || id <= 0) { window.location.hash = "#/"; return; }
-  $view.innerHTML = loadingHTML();
-  const s = await apiCall("GET", "/api/show/" + id);
+  const s = await fetchView("/api/show/" + id);
+  if (!s) return;
   const bg = imgUrl(s.backdrop) || imgUrl(s.poster);
   const metaBits = [];
-  if (s.year) metaBits.push(s.year);
+  if (s.year) metaBits.push(esc(s.year));
   if (s.genres && s.genres.length) metaBits.push(esc(s.genres.join(" / ")));
   if (s.rating != null && s.rating > 0) metaBits.push('<span class="star">★</span> ' + s.rating.toFixed(1));
-  metaBits.push("共 " + s.episode_count + " 集");
+  metaBits.push("共 " + esc(s.episode_count) + " 集");
 
   let continueBtn = "";
   if (s.next_episode) {
@@ -282,11 +300,17 @@ async function renderShow() {
     epList.innerHTML = current.episodes.map(epRowHTML).join("") || '<div class="empty">这一季没有在架的文件</div>';
   }
 
-  epList.addEventListener("click", (ev) => {
-    const row = ev.target.closest(".ep-row");
-    if (!row) return;
+  const playRow = (row) => {
     const epId = parseInt(String(row.dataset.ep || ""), 10);
     if (Number.isInteger(epId) && epId > 0) playItem("episode", epId, "已交给 IINA 播放");
+  };
+  epList.addEventListener("click", (ev) => {
+    const row = ev.target.closest(".ep-row");
+    if (row) playRow(row);
+  });
+  epList.addEventListener("keydown", (ev) => {  // 键盘 Tab 到某一集后回车/空格播放
+    const row = ev.target.closest(".ep-row");
+    if (row && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); playRow(row); }
   });
   const nextBtn = document.getElementById("play-next");
   if (nextBtn && s.next_episode) {
@@ -308,7 +332,7 @@ function recCardHTML(item) {
     .filter(Boolean).join(" · ");
   const because = (item.because || []).join("、");
   return '<div class="card rec-card" data-kind="' + esc(item.kind) +
-    '" data-id="' + item.tmdb_id + '" data-url="' + esc(item.url) + '">' +
+    '" data-id="' + esc(item.tmdb_id) + '" data-url="' + esc(item.url) + '">' +
     posterHTML({ poster: item.poster, title: item.title }) +
     '<button class="rec-dismiss" type="button" title="不感兴趣">×</button>' +
     '<div class="card-t">' + esc(item.title) + "</div>" +
@@ -324,8 +348,8 @@ function recGridHTML(label, items) {
 }
 
 async function renderRecs() {
-  $view.innerHTML = loadingHTML();
-  const d = await apiCall("GET", "/api/recommendations");
+  const d = await fetchView("/api/recommendations");
+  if (!d) return;
   const genLine = d.generated_at ? "生成于 " + fmtTime(d.generated_at) : "还没有生成过推荐";
   let body;
   if (!d.movies.length && !d.shows.length) {
@@ -360,11 +384,13 @@ function bindRecEvents() {
         } catch (err) { toast("操作失败：" + err.message); }
         return;
       }
-      if (card.dataset.url) window.open(card.dataset.url, "_blank");
+      const url = card.dataset.url || "";
+      if (/^https?:\/\//i.test(url)) window.open(url, "_blank");
     });
   }
 }
 
+let recTimer = null;
 async function startRecRefresh(btn) {
   btn.disabled = true;
   btn.textContent = "生成中…";
@@ -376,7 +402,8 @@ async function startRecRefresh(btn) {
     toast("生成失败：" + err.message);
     return;
   }
-  const timer = setInterval(async () => {
+  clearInterval(recTimer);
+  const timer = recTimer = setInterval(async () => {
     try {
       const st = await apiCall("GET", "/api/recommendations/status");
       if (st.running) {
@@ -390,7 +417,7 @@ async function startRecRefresh(btn) {
         toast("生成出错：" + st.error);
       } else {
         toast("推荐已更新：电影 " + st.movies + "、剧集 " + st.shows);
-        renderRecs();
+        if ((window.location.hash || "").startsWith("#/recs")) renderRecs();
       }
     } catch (err) {
       clearInterval(timer);
@@ -436,6 +463,14 @@ function setActiveNav(name) {
 }
 
 async function route() {
+  try {
+    await renderRoute();
+  } catch (err) {  // 渲染本身出错（数据形状不对等）也要给出提示
+    $view.innerHTML = errorHTML(err);
+  }
+}
+
+async function renderRoute() {
   const hash = window.location.hash || "#/";
   if (hash === "#/" || hash === "#" || hash === "") {
     setActiveNav("home");

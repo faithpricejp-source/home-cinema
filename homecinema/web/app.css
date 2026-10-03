@@ -504,9 +504,15 @@ select.sort {
   transition: opacity var(--speed) ease, background var(--speed) ease;
 }
 
-.rec-card:hover .rec-dismiss { opacity: 1; pointer-events: auto; }
+.rec-card:hover .rec-dismiss,
+.rec-card:focus-within .rec-dismiss { opacity: 1; pointer-events: auto; }
 .rec-dismiss:hover { background: var(--accent); color: #1F1E1D; }
 
 @media (max-width: 900px) {
   .rec-dismiss { opacity: 1; pointer-events: auto; }
 }
+
+/* 键盘焦点可见（排序下拉、剧集行、不感兴趣按钮） */
+select.sort:focus-visible,
+.ep-row:focus-visible,
+.rec-dismiss:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

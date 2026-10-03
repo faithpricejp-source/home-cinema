@@ -17,7 +17,7 @@
       <a href="#/recs" data-nav="recs">推荐</a>
     </nav>
     <div class="tools">
-      <input id="search" type="search" placeholder="搜索片名…" autocomplete="off" spellcheck="false">
+      <input id="search" type="search" aria-label="搜索片名" placeholder="搜索片名…" autocomplete="off" spellcheck="false">
       <button id="rescan" class="btn ghost" type="button">重新扫描</button>
     </div>
   </div>
@@ -26,7 +26,7 @@
 <footer class="footer">
   HomeCinema · 元数据与图片来自 <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>，本产品使用 TMDB API 但未经 TMDB 认证。
 </footer>
-<div id="toast" class="toast"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>
