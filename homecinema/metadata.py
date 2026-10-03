@@ -154,6 +154,12 @@ class TmdbClient:
         return self._get("/tv/" + str(int(tv_id)) + "/season/" + str(int(season_number)),
                          {}, language=language)
 
+    def recommendations(self, kind: str, tmdb_id: int) -> list[dict]:
+        """TMDB 推荐接口第 1 页；失败/无结果返回空列表。kind: movie / tv。"""
+        data = self._get("/" + kind + "/" + str(int(tmdb_id)) + "/recommendations", {})
+        results = (data or {}).get("results")
+        return results if isinstance(results, list) else []
+
     def download_image(self, image_path: str, images_dir: Path, kind: str = "poster") -> str | None:
         """下载 TMDB 图片到缓存；文件名 = 尺寸+路径 sha256 前 24 位 + 扩展名。只缓存成功响应。"""
         if not image_path:

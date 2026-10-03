@@ -294,6 +294,112 @@ async function renderShow() {
   }
 }
 
+/* ---------- 推荐 ---------- */
+
+function fmtTime(iso) {
+  const d = new Date(iso);
+  if (!iso || isNaN(d.getTime())) return iso || "";
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+    " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+function recCardHTML(item) {
+  const sub = [item.year, item.rating != null ? "★ " + item.rating.toFixed(1) : ""]
+    .filter(Boolean).join(" · ");
+  const because = (item.because || []).join("、");
+  return '<div class="card rec-card" data-kind="' + esc(item.kind) +
+    '" data-id="' + item.tmdb_id + '" data-url="' + esc(item.url) + '">' +
+    posterHTML({ poster: item.poster, title: item.title }) +
+    '<button class="rec-dismiss" type="button" title="不感兴趣">×</button>' +
+    '<div class="card-t">' + esc(item.title) + "</div>" +
+    (sub ? '<div class="card-s">' + esc(sub) + "</div>" : "") +
+    (because ? '<div class="rec-because">因为你有：' + esc(because) + "</div>" : "") +
+    "</div>";
+}
+
+function recGridHTML(label, items) {
+  if (!items.length) return "";
+  return sectionHTML('<h2>' + label + '</h2><span class="count">' + items.length + " 部</span>",
+    '<div class="grid rec-grid">' + items.map(recCardHTML).join("") + "</div>");
+}
+
+async function renderRecs() {
+  $view.innerHTML = loadingHTML();
+  const d = await apiCall("GET", "/api/recommendations");
+  const genLine = d.generated_at ? "生成于 " + fmtTime(d.generated_at) : "还没有生成过推荐";
+  let body;
+  if (!d.movies.length && !d.shows.length) {
+    body = '<div class="empty">还没有推荐数据，点「生成推荐」从你的片库和观看记录算一份。</div>';
+  } else {
+    body = recGridHTML("电影", d.movies) + recGridHTML("剧集", d.shows);
+  }
+  $view.innerHTML =
+    '<div class="section-head rec-head"><h2>为你推荐</h2>' +
+    '<span class="count">' + esc(genLine) + "</span>" +
+    '<span class="spacer"></span>' +
+    '<button class="btn ghost" id="rec-refresh" type="button">' +
+    (d.movies.length || d.shows.length ? "刷新推荐" : "生成推荐") + "</button></div>" + body;
+  bindRecEvents();
+}
+
+function bindRecEvents() {
+  const btn = document.getElementById("rec-refresh");
+  if (btn) btn.addEventListener("click", () => startRecRefresh(btn));
+  for (const grid of $view.querySelectorAll(".rec-grid")) {
+    grid.addEventListener("click", async (ev) => {
+      const card = ev.target.closest(".rec-card");
+      if (!card) return;
+      if (ev.target.closest(".rec-dismiss")) {
+        const kind = card.dataset.kind;
+        const id = parseInt(card.dataset.id, 10);
+        if (!Number.isInteger(id)) return;
+        try {
+          await apiCall("POST", "/api/recommendations/dismiss", { kind: kind, tmdb_id: id });
+          card.remove();
+          toast("已隐藏，不再推荐");
+        } catch (err) { toast("操作失败：" + err.message); }
+        return;
+      }
+      if (card.dataset.url) window.open(card.dataset.url, "_blank");
+    });
+  }
+}
+
+async function startRecRefresh(btn) {
+  btn.disabled = true;
+  btn.textContent = "生成中…";
+  try {
+    await apiCall("POST", "/api/recommendations/refresh", {});
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "刷新推荐";
+    toast("生成失败：" + err.message);
+    return;
+  }
+  const timer = setInterval(async () => {
+    try {
+      const st = await apiCall("GET", "/api/recommendations/status");
+      if (st.running) {
+        btn.textContent = st.total ? "生成中 " + st.done + "/" + st.total : "生成中…";
+        return;
+      }
+      clearInterval(timer);
+      if (st.error) {
+        btn.disabled = false;
+        btn.textContent = "刷新推荐";
+        toast("生成出错：" + st.error);
+      } else {
+        toast("推荐已更新：电影 " + st.movies + "、剧集 " + st.shows);
+        renderRecs();
+      }
+    } catch (err) {
+      clearInterval(timer);
+      btn.disabled = false;
+      btn.textContent = "刷新推荐";
+    }
+  }, 1000);
+}
+
 /* ---------- 播放 / 标记（URL 固定，id 走 JSON body） ---------- */
 
 /* 在 Home Cinema.app 里（Swift 外壳注册了 player message handler）走内嵌 libmpv 播放；
@@ -346,6 +452,9 @@ async function route() {
   } else if (hash.startsWith("#/show/")) {
     setActiveNav("shows");
     await renderShow();
+  } else if (hash.startsWith("#/recs")) {
+    setActiveNav("recs");
+    await renderRecs();
   } else {
     window.location.hash = "#/";
   }

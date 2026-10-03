@@ -18,6 +18,7 @@ from .config import Config
 from .db import Library, utcnow
 from .metadata import MetadataService, TmdbClient
 from .player import Player, PlayerError
+from .recommend import generate
 from .scanner import run_scan
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -115,6 +116,85 @@ class ScanService:
                 "missing_episodes": self._counts.get("missing_episodes", 0),
                 "metadata_done": self._meta_done,
                 "metadata_total": self._meta_total,
+                "started_at": self._started_at,
+                "finished_at": self._finished_at,
+                "error": self._error,
+            }
+
+
+class RecService:
+    """后台生成推荐；/api/recommendations/status 读这里的进度。
+
+    client_factory 可注入：测试传假 TMDB 客户端，默认按 config 的 key 建 TmdbClient。"""
+
+    def __init__(self, config: Config, db: Library, client_factory=None):
+        self.config = config
+        self.db = db
+        self._client_factory = client_factory
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._phase = "idle"
+        self._done = 0
+        self._total = 0
+        self._counts: dict = {}
+        self._started_at: str | None = None
+        self._finished_at: str | None = None
+        self._error: str | None = None
+
+    def _make_client(self):
+        if self._client_factory is not None:
+            return self._client_factory()
+        key = self.config.read_tmdb_key()
+        if not key:
+            raise RuntimeError("没有配置 TMDB API key")
+        return TmdbClient(key, self.config.tmdb_language)
+
+    def start(self, refresh: bool = True) -> bool:
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._phase = "running"
+            self._done = 0
+            self._total = 0
+            self._counts = {}
+            self._error = None
+            self._started_at = utcnow()
+            self._finished_at = None
+            self._thread = threading.Thread(target=self._run, args=(refresh,),
+                                            daemon=True, name="recommend")
+            self._thread.start()
+            return True
+
+    def _run(self, refresh: bool) -> None:
+        try:
+            client = self._make_client()
+            self._counts = generate(self.db, client, self.config.cache_dir_path,
+                                    self.config.images_dir, refresh=refresh,
+                                    progress=self._progress)
+        except Exception as exc:  # 后台线程兜底，错误在 status 里可见
+            with self._lock:
+                self._error = f"{type(exc).__name__}: {exc}"
+        finally:
+            with self._lock:
+                self._phase = "idle"
+                self._finished_at = utcnow()
+
+    def _progress(self, done: int, total: int, label: str) -> None:
+        with self._lock:
+            self._done = done
+            self._total = total
+
+    def status(self) -> dict:
+        with self._lock:
+            running = self._thread is not None and self._thread.is_alive()
+            return {
+                "running": running,
+                "phase": self._phase,
+                "done": self._done,
+                "total": self._total,
+                "movies": self._counts.get("movies", 0),
+                "shows": self._counts.get("shows", 0),
+                "sources": self._counts.get("sources", 0),
                 "started_at": self._started_at,
                 "finished_at": self._finished_at,
                 "error": self._error,
@@ -226,8 +306,36 @@ def _episode_payload(row) -> dict:
     }
 
 
+def _rec_payload(row) -> dict:
+    try:
+        because = json.loads(row["because"] or "[]")
+    except ValueError:
+        because = []
+    kind = row["kind"]
+    tmdb_id = row["tmdb_id"]
+    rating = row["vote_average"]
+    return {
+        "kind": kind,
+        "tmdb_id": tmdb_id,
+        "title": row["title"],
+        "year": row["year"],
+        "overview": row["overview"],
+        "poster": row["poster_cached"],
+        "rating": round(rating, 1) if rating is not None else None,
+        "because": because if isinstance(because, list) else [],
+        "url": "https://www.themoviedb.org/" + ("movie" if kind == "movie" else "tv")
+               + "/" + str(tmdb_id),
+    }
+
+
+class DismissBody(BaseModel):
+    kind: str
+    tmdb_id: int
+
+
 def create_app(config: Config | None = None, db: Library | None = None,
                player: Player | None = None, scan_service: ScanService | None = None,
+               rec_service: RecService | None = None,
                web_dir: Path | None = None) -> FastAPI:
     """依赖可注入：测试传临时 config/db 和假 launcher 的 Player。"""
     if config is None:
@@ -239,6 +347,8 @@ def create_app(config: Config | None = None, db: Library | None = None,
         player = Player(db=db, config=config)
     if scan_service is None:
         scan_service = ScanService(config, db)
+    if rec_service is None:
+        rec_service = RecService(config, db)
     web = Path(web_dir) if web_dir is not None else WEB_DIR
     app = FastAPI(title="HomeCinema", docs_url=None, redoc_url=None)
 
@@ -346,6 +456,34 @@ def create_app(config: Config | None = None, db: Library | None = None,
     def scan_status():
         return {**scan_service.status(), "playing": player.active_count(),
                 "pid": os.getpid(), "server_started": SERVER_STARTED}
+
+    @app.get("/api/recommendations")
+    def recommendations():
+        rows = db.list_recommendations()
+        return {
+            "movies": [_rec_payload(r) for r in rows if r["kind"] == "movie"],
+            "shows": [_rec_payload(r) for r in rows if r["kind"] == "tv"],
+            "generated_at": db.recommendations_generated_at(),
+        }
+
+    @app.post("/api/recommendations/refresh")
+    def recommendations_refresh():
+        if not config.read_tmdb_key():
+            raise HTTPException(status_code=409,
+                                detail="没有配置 TMDB API key，无法生成推荐")
+        started = rec_service.start(refresh=True)
+        return {"ok": True, "already_running": not started}
+
+    @app.get("/api/recommendations/status")
+    def recommendations_status():
+        return rec_service.status()
+
+    @app.post("/api/recommendations/dismiss")
+    def recommendations_dismiss(body: DismissBody):
+        if body.kind not in ("movie", "tv"):
+            raise HTTPException(status_code=422, detail="kind 必须是 movie 或 tv")
+        db.dismiss_recommendation(body.kind, body.tmdb_id)
+        return {"ok": True}
 
     @app.get("/img/{name}")
     def image(name: str):

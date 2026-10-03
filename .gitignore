@@ -6,3 +6,4 @@ __pycache__/
 .mimosa/
 logs/
 build/
+tests/segments_algo/fixtures/

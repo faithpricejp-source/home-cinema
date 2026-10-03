@@ -55,6 +55,29 @@ def cmd_detect_segments(cfg, args) -> int:
     return 0
 
 
+def cmd_recommend(cfg, args) -> int:
+    from .metadata import TmdbClient
+    from .recommend import generate
+    key = cfg.read_tmdb_key()
+    if not key:
+        print(f"错误：TMDB key 文件不存在或为空（{cfg.tmdb_key_path}）", file=sys.stderr)
+        return 2
+    db = Library(cfg.db_file)
+    try:
+        client = TmdbClient(key, cfg.tmdb_language)
+
+        def progress(done: int, total: int, label: str) -> None:
+            print(f"[{done}/{total}] {label}", flush=True)
+
+        stats = generate(db, client, cfg.cache_dir_path, cfg.images_dir,
+                         refresh=args.refresh, progress=progress)
+    finally:
+        db.close()
+    print(f"推荐完成：电影 {stats['movies']} 部、剧集 {stats['shows']} 部"
+          f"（来源 {stats['sources']} 条）")
+    return 0
+
+
 def cmd_serve(cfg, _args) -> int:
     import uvicorn
     from .server import create_app
@@ -75,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
     ds = sub.add_parser("detect-segments", help="识别剧集片头/片尾并落库")
     ds.add_argument("--show", type=int, default=None, help="只处理指定剧集 ID")
     ds.add_argument("--limit-seasons", type=int, default=None, help="最多处理 N 季")
+    rc = sub.add_parser("recommend", help="按片库和观看记录生成推荐")
+    rc.add_argument("--refresh", action="store_true", help="忽略缓存，重新拉取推荐")
     args = parser.parse_args(argv)
 
     try:
@@ -84,7 +109,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     handlers = {"scan": cmd_scan, "fetch-metadata": cmd_fetch_metadata,
-                "serve": cmd_serve, "detect-segments": cmd_detect_segments}
+                "serve": cmd_serve, "detect-segments": cmd_detect_segments,
+                "recommend": cmd_recommend}
     return handlers[args.command](cfg, args)
 
 

@@ -468,3 +468,45 @@ select.sort {
   .detail-body { flex-direction: column; padding: 0 20px; }
   .cw-card { flex-basis: 340px; }
 }
+
+/* ---------- 推荐 ---------- */
+
+.rec-head { margin-top: 8px; }
+.rec-head h2 { font-family: var(--serif); font-size: 21px; font-weight: 600; margin: 0; }
+
+.rec-card { position: relative; cursor: pointer; }
+
+.rec-because {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 3px;
+}
+
+.rec-dismiss {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--divider);
+  background: rgba(31, 30, 29, 0.85);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--speed) ease, background var(--speed) ease;
+}
+
+.rec-card:hover .rec-dismiss { opacity: 1; pointer-events: auto; }
+.rec-dismiss:hover { background: var(--accent); color: #1F1E1D; }
+
+@media (max-width: 900px) {
+  .rec-dismiss { opacity: 1; pointer-events: auto; }
+}

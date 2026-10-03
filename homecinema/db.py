@@ -107,6 +107,19 @@ CREATE TABLE IF NOT EXISTS segments (
     source TEXT NOT NULL,
     detected_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS recommendations (
+    kind TEXT NOT NULL CHECK (kind IN ('movie','tv')),
+    tmdb_id INTEGER NOT NULL,
+    title TEXT NOT NULL, original_title TEXT, year INTEGER, overview TEXT,
+    poster_cached TEXT, vote_average REAL, vote_count INTEGER,
+    score REAL NOT NULL, because TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    PRIMARY KEY (kind, tmdb_id)
+);
+CREATE TABLE IF NOT EXISTS rec_dismissed (
+    kind TEXT NOT NULL, tmdb_id INTEGER NOT NULL, dismissed_at TEXT NOT NULL,
+    PRIMARY KEY (kind, tmdb_id)
+);
 CREATE INDEX IF NOT EXISTS idx_episodes_show ON episodes(show_id, season_number, episode_number);
 CREATE INDEX IF NOT EXISTS idx_playback_updated ON playback(updated_at);
 """
@@ -451,6 +464,48 @@ class Library:
                 "poster": r["poster_cached"], "added_at": r["added_at"], "href": href,
             })
         return out
+
+    # ---------- 推荐 ----------
+
+    def all_tmdb_ids(self) -> dict[str, set[int]]:
+        """库里已有的 TMDB 编号（含 missing=1 的条目，它们仍算「已拥有」）。"""
+        with self._lock:
+            movies = {int(r["tmdb_id"]) for r in self._conn.execute("SELECT tmdb_id FROM movies WHERE tmdb_id IS NOT NULL").fetchall()}
+            shows = {int(r["tmdb_id"]) for r in self._conn.execute("SELECT tmdb_id FROM shows WHERE tmdb_id IS NOT NULL").fetchall()}
+        return {"movie": movies, "tv": shows}
+
+    def dismissed_recommendations(self) -> set[tuple[str, int]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT kind, tmdb_id FROM rec_dismissed").fetchall()
+        return {(r["kind"], int(r["tmdb_id"])) for r in rows}
+
+    def save_recommendations(self, rows: list[dict]) -> None:
+        """整批替换：先清空再写入，同一事务内完成。"""
+        cols = ("kind", "tmdb_id", "title", "original_title", "year", "overview",
+                "poster_cached", "vote_average", "vote_count", "score", "because", "generated_at")
+        with self._lock:
+            self._conn.execute("DELETE FROM recommendations")
+            self._conn.executemany(
+                "INSERT INTO recommendations (kind, tmdb_id, title, original_title, year, overview, poster_cached, vote_average, vote_count, score, because, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [tuple(r.get(c) for c in cols) for r in rows])
+            self._conn.commit()
+
+    def list_recommendations(self) -> list[sqlite3.Row]:
+        """按 score 降序；kind 分组由调用方处理。"""
+        with self._lock:
+            return self._conn.execute("SELECT * FROM recommendations ORDER BY score DESC").fetchall()
+
+    def dismiss_recommendation(self, kind: str, tmdb_id: int) -> None:
+        """记进「不感兴趣」并从推荐表删掉这一条。"""
+        with self._lock:
+            self._conn.execute("INSERT INTO rec_dismissed (kind, tmdb_id, dismissed_at) VALUES (?, ?, ?) ON CONFLICT(kind, tmdb_id) DO UPDATE SET dismissed_at=excluded.dismissed_at", (kind, int(tmdb_id), utcnow()))
+            self._conn.execute("DELETE FROM recommendations WHERE kind=? AND tmdb_id=?", (kind, int(tmdb_id)))
+            self._conn.commit()
+
+    def recommendations_generated_at(self) -> str | None:
+        with self._lock:
+            row = self._conn.execute("SELECT MAX(generated_at) AS ts FROM recommendations").fetchone()
+        return row["ts"] if row else None
 
 
 def _meta_value(value):

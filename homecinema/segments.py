@@ -121,7 +121,29 @@ def _bits_diff(x: int, y: int) -> int:
     return ((x ^ y) & 0xFFFFFFFF).bit_count()
 
 
+STRICT_BIT_DIFF = 6
+
+
 def find_shared(
+    a: list[int],
+    b: list[int],
+    *,
+    max_bit_diff: int = 8,
+    min_len_sec: float = 15.0,
+    max_gap_sec: float = 3.5,
+) -> tuple[float, float, float, float] | None:
+    """先按 6 位的严门槛找（边界最准）；找不到再按 max_bit_diff（默认 8）找（召回）。
+    宽门槛会把片段两头各多延伸一两秒，所以只在严门槛找不到时才用。参数含义见 _find_shared_at。"""
+    if max_bit_diff > STRICT_BIT_DIFF:
+        strict = _find_shared_at(a, b, max_bit_diff=STRICT_BIT_DIFF,
+                                 min_len_sec=min_len_sec, max_gap_sec=max_gap_sec)
+        if strict is not None:
+            return strict
+    return _find_shared_at(a, b, max_bit_diff=max_bit_diff,
+                           min_len_sec=min_len_sec, max_gap_sec=max_gap_sec)
+
+
+def _find_shared_at(
     a: list[int],
     b: list[int],
     *,
@@ -153,7 +175,7 @@ def find_shared(
     best_len = 0
     best_a0 = best_a1 = best_d = 0
 
-    for d in range(1 - lb, la):
+    for d in _candidate_offsets(a, b, max_bit_diff, min_ticks):
         # 对角线上 a 的下标区间 [i0, i1)，对应的 b 下标是 i - d
         i0 = max(0, d)
         i1 = min(la, lb + d)
@@ -212,6 +234,32 @@ def find_shared(
     )
 
 
+# 粗筛：每个错位先用 numpy 数「相同」的点，只对点数最多的前 TOP_OFFSETS 个错位做精细扫描。
+# 全量扫描是 O(len(a)·len(b)) 的纯 Python 循环，600 秒窗口一对要几秒，整个片库要跑一天；
+# 共同片段所在的错位，相同点数一定远高于其他错位，前 12 个足够把它包含进去。
+TOP_OFFSETS = 12
+
+
+def _candidate_offsets(a: list[int], b: list[int], max_bit_diff: int, min_ticks: int):
+    la, lb = len(a), len(b)
+    try:
+        import numpy as np
+    except ImportError:  # 没装 numpy 就退回全量扫描
+        return range(1 - lb, la)
+    A = np.asarray(a, dtype=np.int64).astype(np.uint32)
+    B = np.asarray(b, dtype=np.int64).astype(np.uint32)
+    scored = []
+    for d in range(1 - lb, la):
+        i0, i1 = max(0, d), min(la, lb + d)
+        if i1 - i0 < min_ticks:
+            continue
+        hits = int(np.count_nonzero(np.bitwise_count(A[i0:i1] ^ B[i0 - d:i1 - d]) <= max_bit_diff))
+        if hits >= min_ticks * (1 - MAX_GAP_RATIO):
+            scored.append((hits, d))
+    scored.sort(reverse=True)
+    return [d for _, d in scored[:TOP_OFFSETS]]
+
+
 def _trim_edges(flags: list[int]) -> tuple[int, int] | None:
     """按局部匹配率掐掉候选片段两头「虚接」的部分。
 
@@ -242,6 +290,9 @@ def _trim_edges(flags: list[int]) -> tuple[int, int] | None:
     return (left, max(right, left + width))
 
 
+NEIGHBORS = 3
+
+
 def detect_season(
     fps: dict[str, list[int]],
     *,
@@ -265,8 +316,10 @@ def detect_season(
         return result
 
     candidates: dict[str, list[tuple[float, float]]] = {k: [] for k in keys}
+    # 每集只跟后面 NEIGHBORS 集比（前面的已经比过），每集最多 2×NEIGHBORS 个比对对象：
+    # 全两两比对是 O(n²)，整个片库 3.8 万对；邻近几集足够投票，也更贴近同一阶段的片头
     for x in range(len(keys)):
-        for y in range(x + 1, len(keys)):
+        for y in range(x + 1, min(len(keys), x + 1 + NEIGHBORS)):
             ka, kb = keys[x], keys[y]
             shared = find_shared(
                 fps[ka], fps[kb], min_len_sec=min_len_sec

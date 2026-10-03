@@ -22,7 +22,7 @@ A local, Infuse-style media library app for macOS: scans your movie / TV folders
 git clone https://github.com/faithpricejp-source/home-cinema.git
 cd home-cinema
 /opt/homebrew/bin/python3 -m venv .venv
-.venv/bin/pip install fastapi uvicorn httpx pytest
+.venv/bin/pip install fastapi uvicorn httpx pytest numpy
 cp config.example.toml config.toml   # 然后按下一节编辑
 macapp/build.sh                      # 编译 Home Cinema.app 并拷到 /Applications
 ```
