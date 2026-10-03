@@ -144,3 +144,48 @@ def test_video_ext_case_insensitive_and_hidden_ignored(tmp_path, cfg, lib):
     run_scan(cfg, lib)
     titles = [r["title"] for r in lib.list_movies()]
     assert "Only Hidden" not in titles
+
+
+# ---- 2026-10-03 免费模型审计（ZCode GLM-5.3-Flash）带出的命名支持 ----
+
+from homecinema.scanner import episode_tag, parse_title_year, season_from_dir
+
+
+def test_episode_tag_after_underscore_and_cjk():
+    assert episode_tag("Sample_Show_S01E01.mkv") == (1, 1)
+    assert episode_tag("剧名S01E02.mkv") == (1, 2)
+    assert episode_tag("Sample.Show.S02.E03.1080p.mkv") == (2, 3)
+    assert episode_tag("Sample Show 1x04.mkv") == (1, 4)
+    # 不误认：分辨率、编码、无集号
+    assert episode_tag("Sample Movie 1920x1080.mkv") is None
+    assert episode_tag("Sample.Movie.x264.mkv") is None
+    assert episode_tag("Classes01e02.mkv") is None
+
+
+def test_season_dir_variants():
+    assert season_from_dir("Season 01") == 1
+    assert season_from_dir("Season_2") == 2
+    assert season_from_dir("Season 1 (2020)") == 1
+    assert season_from_dir("Season  3 ") == 3
+    assert season_from_dir("第2季") == 2
+    assert season_from_dir("Specials") == 0
+    assert season_from_dir("Extras") is None
+    assert season_from_dir("Seasoning") is None
+
+
+def test_fullwidth_year_parens():
+    assert parse_title_year("示例电影（2001）") == ("示例电影", 2001)
+    assert parse_title_year("Example Movie (2001)") == ("Example Movie", 2001)
+
+
+def test_underscore_episodes_scanned_end_to_end(tmp_path, cfg, lib):
+    show = tmp_path / "tv" / "Sample Show"
+    (show / "Season 01").mkdir(parents=True)
+    (show / "Season 01" / "Sample_Show_S01E01.mkv").write_bytes(b"")
+    (show / "Specials").mkdir()
+    (show / "Specials" / "Sample Show S00E01.mkv").write_bytes(b"")
+    (show / "Sample_Show_S02E01.mkv").write_bytes(b"")
+    run_scan(cfg, lib)
+    eps = sorted((e["season_number"], e["episode_number"])
+                 for s in lib.list_shows() for e in lib.episodes_for_show(s["id"]))
+    assert eps == [(0, 1), (1, 1), (2, 1)]

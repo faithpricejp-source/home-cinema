@@ -18,10 +18,33 @@ from .db import Library
 
 VIDEO_EXTS = {"mp4", "mkv", "avi", "rmvb", "m4v", "mov", "ts", "wmv", "flv", "webm"}
 
-FOLDER_TITLE_YEAR = re.compile(r"^(.*?)[ \t_]*\((\d{4})\)[ \t]*$")
-SEASON_DIR = re.compile(r"^Season[ _-]?(\d{1,2})$", re.IGNORECASE)
-# 双集文件 "S06E01E02" 也要认：取第一集的集号
-EPISODE_TAG = re.compile(r"(?i)\bs(\d{1,2})\s?e(\d{1,3})(?!\d)")
+# 年份括号也认全角（中文输入法默认）：`电影（2001）`
+FOLDER_TITLE_YEAR = re.compile(r"^(.*?)[ \t_]*[(（](\d{4})[)）][ \t]*$")
+# `Season 1`、`Season_01`、`Season 1 (2020)`、`第1季`；`Specials` 按 Plex/Jellyfin 惯例当第 0 季
+SEASON_DIR = re.compile(r"^(?:Season[ _-]*(\d{1,2})(?:[ _-]+.*)?|第\s*(\d{1,2})\s*季|(Specials?))\s*$",
+                        re.IGNORECASE)
+# 双集文件 "S06E01E02" 也要认：取第一集的集号。
+# 前面不用 \b：`名_S01E01`、`剧名S01E01` 里下划线和汉字都算词字符，\b 不成立；改成「前面不是字母数字」。
+# S 与 E 之间允许空格、点、横线、下划线（`S01.E01`）。
+EPISODE_TAG = re.compile(r"(?i)(?<![a-z0-9])s(\d{1,2})[ ._-]?e(\d{1,3})(?!\d)")
+# 后备：`1x01` 写法（前后不能紧邻数字，免得把 1920x1080 认成集号）
+EPISODE_TAG_X = re.compile(r"(?i)(?<![a-z0-9])(\d{1,2})x(\d{2,3})(?!\d)")
+
+
+def season_from_dir(name: str) -> int | None:
+    """季目录名 → 季号；不是季目录返回 None。"""
+    m = SEASON_DIR.match(name.strip())
+    if not m:
+        return None
+    if m.group(3):
+        return 0
+    return int(m.group(1) or m.group(2))
+
+
+def episode_tag(name: str) -> tuple[int, int] | None:
+    """文件名里的 (季, 集)；没有返回 None。"""
+    m = EPISODE_TAG.search(name) or EPISODE_TAG_X.search(name)
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def is_video_file(name: str) -> bool:
@@ -119,10 +142,9 @@ def scan_tv_root(root: str, result: ScanResult) -> None:
         season_dirs = [p for p in sorted(series_dir.iterdir(), key=lambda p: p.name)
                        if p.is_dir() and not p.name.startswith(".")]
         for sub in season_dirs:
-            m = SEASON_DIR.match(sub.name)
-            if m:
-                _scan_episode_dir(sub, series_dir, show_title, show_year,
-                                  int(m.group(1)), result)
+            sn = season_from_dir(sub.name)
+            if sn is not None:
+                _scan_episode_dir(sub, series_dir, show_title, show_year, sn, result)
         # 直接放在剧集文件夹下的视频（无 Season 层），季号从文件名 SxxExx 取
         _scan_episode_dir(series_dir, series_dir, show_title, show_year, None, result,
                           nested=False)
@@ -134,11 +156,11 @@ def _scan_episode_dir(dir_path: Path, series_dir: Path, show_title: str,
     for f in sorted(dir_path.iterdir(), key=lambda p: p.name):
         if not f.is_file() or not is_video_file(f.name):
             continue
-        m = EPISODE_TAG.search(f.name)
-        if not m:
-            continue  # 文件名里没有 SxxExx 的不入库
-        season = int(m.group(1)) if season_number is None else season_number
-        episode = int(m.group(2))
+        tag = episode_tag(f.name)
+        if not tag:
+            continue  # 文件名里没有 SxxExx / 1x01 的不入库
+        season = tag[0] if season_number is None else season_number
+        episode = tag[1]
         size, mtime, added = _file_stat(f)
         result.episodes.append(EpisodeFile(
             path=str(f.resolve()), show_path=str(series_dir.resolve()),
