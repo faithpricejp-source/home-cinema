@@ -135,6 +135,18 @@ database (the `segments` table):
 - Each season is written to the database as soon as it is done: if the run is interrupted, re-running it skips the seasons already finished.
 - `GET /api/segments?episode_id=N` shows the detection result for one episode (for debugging).
 
+The credits also have an additional **on-screen text recognition** pass to fill gaps and verify results (audio fingerprinting misses end credits whose music changes from episode to episode and may trigger too early or too late):
+
+```bash
+.venv/bin/pip install pyobjc-framework-Vision pyobjc-framework-Quartz pillow
+.venv/bin/python tools/ocr_extract_batch.py        # Capture a frame every 2 seconds during the last 5 minutes of each episode and use macOS Vision to detect text; the feature cache supports resuming
+.venv/bin/python tools/apply_ocr_credits.py        # Preview which episodes will be changed; add --write to save the changes
+```
+
+- Detection (`homecinema/ocr_credits.py`): A frame is considered to show the credits if it has a black background, contains at least two lines of text, is not a full sentence, and is not a station logo. Select the start of the block with the most text frames that ends within the final 90 seconds.
+- Merging: Add credits directly to episodes that do not have them. If the existing value is fingerprint-only and differs from the OCR result by more than 10 seconds, use the OCR result. If the existing value includes chapter markers, allow it to move only later (prefer a later transition over an earlier one; once the credits begin, skip to the next episode).
+- If OCR still cannot detect the credits (for example, when the credits are overlaid on the video), `tools/vlm_credits.py batch` creates a thumbnail grid from the last 5 minutes and uses a vision model to determine which frame marks the end of the story (the script uses an OpenAI-compatible endpoint and can be replaced as needed).
+
 The app menu 「显示 → 跳过片头片尾」 (View → Skip Intro/Outro) is the master switch (on by default, stored in UserDefaults as `skipIntroOutro`).
 When an intro is skipped the overlay shows 「已跳过片头 · 按 ← 回看」 (Intro skipped · press ← to rewind); dragging back into the intro
 manually will not skip again, and turning the switch off stops skipping immediately for the episode currently playing.
