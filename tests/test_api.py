@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +28,10 @@ def client(tmp_path, cfg, lib):
     (show / "Season 01").mkdir(parents=True)
     (show / "Season 01" / "Sample Show S01E01.mkv").write_bytes(b"")
     (show / "Season 01" / "Sample Show S01E02.mkv").write_bytes(b"")
+    # 电影文件比剧集早入库：显式拨回 mtime（macOS 会连 birthtime 一起拨回）。
+    # Linux ext4 时间戳按内核 tick 取整，连写的几个文件 mtime 完全相同，不拨就并列、顺序看运气
+    old = time.time() - 3600
+    os.utime(folder / "Example Movie (2001).mp4", (old, old))
 
     run_scan(cfg, lib)
 

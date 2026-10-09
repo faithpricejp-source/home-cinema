@@ -23,6 +23,7 @@ def cfg(tmp_path) -> Config:
         tmdb_key_file=str(tmp_path / "tmdb-key.txt"),
         assrt_token_file=str(tmp_path / "assrt-token.txt"),
         theintrodb_key_file=str(tmp_path / "tidb-key.txt"),
+        overrides_file=str(tmp_path / "overrides.toml"),  # 不读本机真实的 overrides.toml
         tmdb_language="zh-CN",
         port=8770,
         iina_cli="/fake/iina-cli",

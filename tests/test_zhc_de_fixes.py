@@ -57,12 +57,18 @@ def _mk_ep(series, season, filename):
     (d / filename).write_bytes(b"")
 
 
+# root 无视权限位：chmod 0o111 后照样能列目录，复现不出 PermissionError
+needs_non_root = pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                                    reason="root 无视目录权限位，造不出不可读目录")
+
+
 def _lock(path):
     """--x--x--x：stat 能过（is_dir True），列目录 PermissionError（非 root）。"""
     path.chmod(0o111)
     return path
 
 
+@needs_non_root
 def test_d2_unreadable_movie_folder_does_not_abort_scan(tmp_path, cfg, lib):
     movies = tmp_path / "movies"
     _mk_movie(movies, "Good Movie (2001)")
@@ -79,6 +85,7 @@ def test_d2_unreadable_movie_folder_does_not_abort_scan(tmp_path, cfg, lib):
         locked.chmod(0o755)
 
 
+@needs_non_root
 def test_d2_unreadable_season_dir_does_not_abort_scan(tmp_path, cfg, lib):
     tv = tmp_path / "tv"
     _mk_ep(tv / "Good Show", "Season 01", "Good Show S01E01.mkv")
@@ -94,6 +101,7 @@ def test_d2_unreadable_season_dir_does_not_abort_scan(tmp_path, cfg, lib):
         locked.chmod(0o755)
 
 
+@needs_non_root
 def test_d2_unreadable_series_dir_does_not_abort_scan(tmp_path, cfg, lib):
     tv = tmp_path / "tv"
     _mk_ep(tv / "Good Show", "Season 01", "Good Show S01E01.mkv")
