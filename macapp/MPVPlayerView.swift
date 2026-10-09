@@ -17,8 +17,9 @@ private let glFramework: UnsafeMutableRawPointer? = dlopen(
 final class MPVPlayerView: NSOpenGLView {
     static let subLangs = "chi,zho,zh,chs,zh-Hans,zh-CN,cht,zh-Hant,zh-TW,eng,en"
 
-    // 播放结束原因：播完（EOF）还是用户退出/其他
-    enum EndReason { case eof, user }
+    // 播放结束原因：播完（EOF）还是用户退出/其他；error 是 mpv 打不开/读不了文件
+    // （Kimi-F-1：要和「用户按 ESC」区分开，否则自动下一集加载失败会静默回海报墙）
+    enum EndReason { case eof, user, error }
 
     var onEscape: (() -> Void)?                 // 主队列回调
     var onPlaybackEnded: ((EndReason) -> Void)? // 主队列回调
@@ -149,7 +150,7 @@ final class MPVPlayerView: NSOpenGLView {
     // MARK: 播放控制
 
     /// 播放 <path> 并从 <start> 秒开始。replace 语义：切下一集也走这里。
-    func load(path: String, start: Double, title: String? = nil) {
+    func load(path: String, start: Double, title: String? = nil, subs: [String] = []) {
         stateLock.lock(); _position = nil; _duration = nil; stateLock.unlock()  // 换片时清掉上一集的值
         // mpv ≥0.38：loadfile <url> <flags> <index> <options>，index 填 -1；选项在第 4 个参数
         var opts = "start=\(Int(start))"
@@ -158,7 +159,19 @@ final class MPVPlayerView: NSOpenGLView {
             // %字节数%值 是 mpv 选项列表里转义任意字符（含逗号）的写法
             opts += ",force-media-title=%\(title.utf8.count)%\(title)"
         }
+        if !subs.isEmpty {
+            // 下载的中文字幕（服务端存的文件名里已去掉 ':'，可以用 ':' 拼成路径列表）
+            let list = subs.joined(separator: ":")
+            opts += ",sub-files=%\(list.utf8.count)%\(list)"
+        }
         mpvCommand(["loadfile", path, "replace", "-1", opts])
+        // 结束播放时会先暂停（见 pause()）；mpv 默认换片保留 pause 设置，下一集要显式恢复
+        mpvCommand(["set", "pause", "no"])
+    }
+
+    /// 暂停（结束播放的收尾期间先停住音画，10-05 审计 S05）。
+    func pause() {
+        mpvCommand(["set", "pause", "yes"])
     }
 
     /// 跳到绝对秒数（自动跳过片头用）。
@@ -272,13 +285,17 @@ final class MPVPlayerView: NSOpenGLView {
     }
 
     private func handleEndFile(_ data: UnsafeMutableRawPointer?) {
-        var eof = false
+        var reason: EndReason = .user
         if let data = data {
             let endFile = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
-            eof = endFile.reason == MPV_END_FILE_REASON_EOF
+            if endFile.reason == MPV_END_FILE_REASON_EOF {
+                reason = .eof
+            } else if endFile.reason == MPV_END_FILE_REASON_ERROR {
+                reason = .error  // Kimi-F-1：loadfile 失败（文件在 /api/play 之后才失效）
+            }
         }
         let ended = onPlaybackEnded
-        DispatchQueue.main.async { ended?(eof ? .eof : .user) }
+        DispatchQueue.main.async { ended?(reason) }
     }
 
     // MARK: 命令

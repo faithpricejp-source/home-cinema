@@ -68,3 +68,14 @@ def test_block_far_from_end_rejected():
 def test_block_touching_window_start_is_none():
     ep = episode(credits(1101, 1399))
     assert oc.decide(ep) is None
+
+
+def test_dark_scene_dialog_not_credits():
+    # 暗场对白（双语字幕，识别成三行、位置偏上）紧挨片尾：问号/省略号/叹号结尾的不算演职员表
+    dialog = [(("Someone from Pasadena,", 0.3, 0.2, 0.4, 0.04), ("California named...", 0.3, 0.16, 0.4, 0.04),
+               ("Someone from Pasadena, California named...", 0.3, 0.02, 0.4, 0.03)),
+              (("Who's doing that?", 0.3, 0.2, 0.4, 0.04), ("Who's doing that?", 0.3, 0.02, 0.4, 0.03),
+               ("Who is that", 0.3, 0.16, 0.4, 0.04))]
+    ep = episode(story(1101, 1281) + [frame(t, dark=0.8, lines=dialog[t // 2 % 2]) for t in range(1281, 1301, 2)]
+                 + credits(1301, 1399))
+    assert oc.decide(ep) == 1300.0

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 import unicodedata
 from dataclasses import dataclass, field, fields
@@ -29,6 +30,10 @@ class Config:
     cache_dir: str = "~/Library/Caches/HomeCinema"
     tmdb_key_file: str = "~/.config/tmdb/api-key.txt"
     tmdb_language: str = "zh-CN"
+    # TheIntroDB 的 key（可选）：不配也能匿名查，但匿名有每日额度
+    theintrodb_key_file: str = "~/.config/TIDB/api-key.txt"
+    # 射手网（assrt.net）token：中文字幕搜索下载用；不配就不显示搜索
+    assrt_token_file: str = "~/.config/assrt/token.txt"
     port: int = 8770
     iina_cli: str = "/Applications/IINA.app/Contents/MacOS/iina-cli"
     # 手动指定匹配：[movie] / [tv] 两节，键是文件夹名，值是 TMDB 编号
@@ -56,14 +61,53 @@ class Config:
         return norm_path(self.tmdb_key_file)
 
     def read_overrides(self) -> dict:
-        """{"movie": {文件夹名: tmdb_id}, "tv": {...}}；文件不存在就是空。"""
+        """{"movie": {文件夹名: tmdb_id}, "tv": {...}}；文件不存在就是空。
+
+        值不是整数的条目跳过并告警、节不是表的整节忽略（Kimi-D-4）：
+        一份写错的 overrides.toml 不该让 fetch-metadata 运行到一半以 traceback 崩溃。"""
         try:
             data = tomllib.loads(norm_path(self.overrides_file).read_text(encoding="utf-8"))
         except (OSError, tomllib.TOMLDecodeError):
             return {"movie": {}, "tv": {}}
         # 文件夹名统一成 NFC：macOS 上 "ä"、"ō" 可能以分解形式存储，跟手写的键对不上
-        return {k: {unicodedata.normalize("NFC", str(n)): int(v)
-                    for n, v in (data.get(k) or {}).items()} for k in ("movie", "tv")}
+        out: dict = {}
+        for k in ("movie", "tv"):
+            section = data.get(k) or {}
+            entries: dict = {}
+            if not isinstance(section, dict):
+                if section:
+                    print(f"警告：overrides.toml 的 [{k}] 节不是表，已忽略（得到 {type(section).__name__}）",
+                          file=sys.stderr)
+            else:
+                for n, v in section.items():
+                    if isinstance(v, bool) or not isinstance(v, int):
+                        try:  # "88" 这类带引号的整数也认
+                            v = int(str(v))
+                        except (TypeError, ValueError):
+                            print(f"警告：overrides.toml 的 {k}.{n} 不是整数，已忽略（值 {v!r}）",
+                                  file=sys.stderr)
+                            continue
+                    entries[unicodedata.normalize("NFC", str(n))] = v
+            out[k] = entries
+        return out
+
+    def read_assrt_token(self) -> str | None:
+        try:
+            text = norm_path(self.assrt_token_file).read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return text or None
+
+    @property
+    def subs_dir(self) -> Path:
+        return self.db_file.parent / "subs"
+
+    def read_theintrodb_key(self) -> str | None:
+        try:
+            text = norm_path(self.theintrodb_key_file).read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return text or None
 
     def read_tmdb_key(self) -> str | None:
         """只从 key 文件读，不进代码、不进日志。"""

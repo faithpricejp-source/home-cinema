@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import Config
-from .db import Library
+from .db import Library, utcnow
 
 VIDEO_EXTS = {"mp4", "mkv", "avi", "rmvb", "m4v", "mov", "ts", "wmv", "flv", "webm"}
 
@@ -97,6 +97,7 @@ class EpisodeFile:
 class ScanResult:
     movies: list[MovieFile] = field(default_factory=list)
     episodes: list[EpisodeFile] = field(default_factory=list)
+    started_at: str = ""  # Kimi-D-3：扫描开始时刻，标 missing 时用来放过并发写入
 
 
 def _file_stat(path: Path) -> tuple[int, float, str]:
@@ -117,12 +118,15 @@ def scan_movie_root(root: str, result: ScanResult) -> None:
     for entry in sorted(base.iterdir(), key=lambda p: p.name):
         if entry.name.startswith(".") or not entry.is_dir():
             continue
-        videos = [p for p in sorted(entry.iterdir(), key=lambda p: p.name)
-                  if p.is_file() and is_video_file(p.name)]
-        if not videos:
-            continue
-        video = videos[0]  # 约定一个文件夹一部电影；多个时取文件名序第一个
-        size, mtime, added = _file_stat(video)
+        try:
+            videos = [p for p in sorted(entry.iterdir(), key=lambda p: p.name)
+                      if p.is_file() and is_video_file(p.name)]
+            if not videos:
+                continue
+            video = videos[0]  # 约定一个文件夹一部电影；多个时取文件名序第一个
+            size, mtime, added = _file_stat(video)
+        except OSError:
+            continue  # Kimi-D-2：单个文件夹被移走/暂时不可读，跳过它，不中断整轮扫描
         title, year = parse_title_year(entry.name)
         result.movies.append(MovieFile(
             path=str(video.resolve()), folder=str(entry.resolve()),
@@ -137,10 +141,13 @@ def scan_tv_root(root: str, result: ScanResult) -> None:
     for series_dir in sorted(base.iterdir(), key=lambda p: p.name):
         if series_dir.name.startswith(".") or not series_dir.is_dir():
             continue
+        try:
+            # Season NN 层
+            season_dirs = [p for p in sorted(series_dir.iterdir(), key=lambda p: p.name)
+                           if p.is_dir() and not p.name.startswith(".")]
+        except OSError:
+            continue  # Kimi-D-2：单部剧集目录暂时不可读，跳过它，不中断整轮扫描
         show_title, show_year = parse_title_year(series_dir.name)
-        # Season NN 层
-        season_dirs = [p for p in sorted(series_dir.iterdir(), key=lambda p: p.name)
-                       if p.is_dir() and not p.name.startswith(".")]
         for sub in season_dirs:
             sn = season_from_dir(sub.name)
             if sn is not None:
@@ -153,7 +160,11 @@ def scan_tv_root(root: str, result: ScanResult) -> None:
 def _scan_episode_dir(dir_path: Path, series_dir: Path, show_title: str,
                       show_year: int | None, season_number: int | None,
                       result: ScanResult, nested: bool = True) -> None:
-    for f in sorted(dir_path.iterdir(), key=lambda p: p.name):
+    try:
+        files = sorted(dir_path.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return  # Kimi-D-2：目录暂时不可读，整目录跳过
+    for f in files:
         if not f.is_file() or not is_video_file(f.name):
             continue
         tag = episode_tag(f.name)
@@ -161,7 +172,10 @@ def _scan_episode_dir(dir_path: Path, series_dir: Path, show_title: str,
             continue  # 文件名里没有 SxxExx / 1x01 的不入库
         season = tag[0] if season_number is None else season_number
         episode = tag[1]
-        size, mtime, added = _file_stat(f)
+        try:
+            size, mtime, added = _file_stat(f)
+        except OSError:
+            continue  # Kimi-D-2：文件在列举与 stat 之间被移走，跳过这一集
         result.episodes.append(EpisodeFile(
             path=str(f.resolve()), show_path=str(series_dir.resolve()),
             show_title=show_title, show_year=show_year,
@@ -198,8 +212,10 @@ def apply_scan(db: Library, result: ScanResult) -> dict:
                           episode_number=e.episode_number, path=e.path,
                           video_name=e.video_name, ext=e.ext, title=e.title,
                           size=e.size, mtime=e.mtime, added_at=e.added_at or None)
-    missing_movies = db.mark_missing_movies(seen_movies)
-    missing_episodes = db.mark_missing_episodes(seen_episodes)
+    missing_movies = db.mark_missing_movies(seen_movies,
+                                            before=result.started_at or None)
+    missing_episodes = db.mark_missing_episodes(seen_episodes,
+                                                before=result.started_at or None)
     db.refresh_show_missing()
     db.refresh_show_added()
     return {
@@ -214,7 +230,16 @@ def run_scan(config: Config, db: Library, progress=None) -> dict:
     """扫描 + 入库。progress(phase, done, total) 用于 /api/scan/status。"""
     if progress:
         progress("scanning", 0, 0)
+    started = utcnow()  # Kimi-D-3：扫描开始时刻，期间被其他进程 upsert 的路径不误标 missing
+    roots = [Path(r).expanduser() for r in (*config.movie_roots, *config.tv_roots)]
+    present = [r for r in roots if r.is_dir()]
     result = scan_paths(config)
+    # Kimi-D-2 验收补：子目录出错改为跳过后，扫描途中外接盘卸载会让每个子目录都被跳过、
+    # 随后整库标 missing。开始时在、扫完不在的根目录 → 整轮中止，不入库不标 missing。
+    gone = [str(r) for r in present if not r.is_dir()]
+    if gone:
+        raise OSError(f"扫描途中片库根目录不可用：{', '.join(gone)}")
+    result.started_at = started
     stats = apply_scan(db, result)
     if progress:
         progress("scanning", stats["movies"] + stats["episodes"],

@@ -119,13 +119,31 @@ def sheet_for(eid: int) -> tuple[str, float, int, float]:
     con = sqlite3.connect(DB)
     path = con.execute("SELECT path FROM episodes WHERE id=?", (eid,)).fetchone()[0]
     dur = probe_duration(path)
+    if not dur:  # Kimi-P3: probe_duration 对损坏/不受支持的视频合法返回 None，
+        # 不拦会在 build_sheet 里 None - VLM_TAIL_SEC 抛 TypeError，错误信息不知所云
+        raise RuntimeError(f"{path}: ffprobe 取不到时长（文件损坏或格式不支持）")
     out = os.path.join(SHEETS, f"{eid}.jpg")
     meta = out + ".json"
     if os.path.exists(out) and os.path.exists(meta):
-        m = json.load(open(meta))
-        return out, m["t0"], m["n"], dur
+        try:
+            with open(meta, encoding="utf-8") as fh:
+                m = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            m = None  # Kimi-P5: 上次写 meta 中途被杀会留残缺 meta，当缓存未命中重建
+        st = os.stat(path)
+        # Kimi-P5: 缓存原先只按集 id 键控，文件被重新压制/替换后会永远复用旧拼图；
+        # 比对 mtime/size/时长，对不上（含旧版 meta 缺这些键）就重建
+        if m and m.get("mtime") == st.st_mtime_ns and m.get("size") == st.st_size \
+                and abs(float(m.get("duration", float("nan"))) - dur) < 1e-6:
+            return out, m["t0"], m["n"], dur
     t0, n = build_sheet(path, dur, out)
-    json.dump({"t0": t0, "n": n}, open(meta, "w"))
+    st = os.stat(path)
+    # Kimi-P5: 原子写 meta（同目录 mkstemp + os.replace），写一半被杀不会留残缺 JSON
+    fd, tmp = tempfile.mkstemp(dir=SHEETS, suffix=".json.tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump({"t0": t0, "n": n, "mtime": st.st_mtime_ns,
+                   "size": st.st_size, "duration": dur}, fh)
+    os.replace(tmp, meta)
     return out, t0, n, dur
 
 
@@ -149,13 +167,22 @@ def batch_targets() -> list[int]:
     cache = os.path.expanduser("~/Library/Caches/HomeCinema/ocr_tail")
     con = sqlite3.connect(DB)
     out = []
-    for eid, c0, source in con.execute(
-            "SELECT e.id, s.credits_start, s.source FROM episodes e "
+    for eid, c0, source, path in con.execute(
+            "SELECT e.id, s.credits_start, s.source, e.path FROM episodes e "
             "JOIN segments s ON s.episode_id = e.id WHERE e.missing = 0 ORDER BY e.id"):
         f = os.path.join(cache, f"{eid}.json")
         if not os.path.exists(f):
             continue
-        if oc.decide(json.load(open(f, encoding="utf-8"))) is not None:
+        data = json.load(open(f, encoding="utf-8"))
+        try:
+            st = os.stat(path) if path else None
+        except OSError:
+            st = None
+        # fix-1007-T-2: 过期 OCR 不得决定要不要打付费 VLM；本函数不重截帧
+        if not oc.cache_matches(data, st):
+            print(f"警告: 集 {eid} OCR 缓存与源文件指纹不符，跳过", file=sys.stderr)
+            continue
+        if oc.decide(data) is not None:
             continue
         if c0 is None or source == "fingerprint":
             out.append(eid)
@@ -165,7 +192,15 @@ def batch_targets() -> list[int]:
 def run_batch() -> int:
     done = set()
     if os.path.exists(RESULTS):
-        done = {json.loads(l)["eid"] for l in open(RESULTS, encoding="utf-8")}
+        for l in open(RESULTS, encoding="utf-8"):
+            # Kimi-P4: append 写入被 SIGKILL 会留残行、也可能有空行；残行里没有
+            # 完整 eid，跳过无损（对应集下次重判），坏一行不能让整批启动即崩
+            if not l.strip():
+                continue
+            try:
+                done.add(json.loads(l)["eid"])
+            except (json.JSONDecodeError, KeyError):
+                continue
     todo = [e for e in batch_targets() if e not in done]
     print(f"视觉模型待判 {len(todo)} 集（已判 {len(done)}）", flush=True)
     for i, eid in enumerate(todo, 1):
@@ -191,9 +226,11 @@ def main() -> int:
     if len(sys.argv) >= 4 and sys.argv[1] == "eval":
         model = sys.argv[2]
         for eid in map(int, sys.argv[3:]):
-            img, t0, n, dur = sheet_for(eid)
             t = time.time()
             try:
+                # Kimi-P6: sheet_for 一并进 try——单集取拼图失败（文件被移走、
+                # id 不存在、时长取不到等）只打印错误行后继续下一集，与 run_batch 对齐
+                img, t0, n, dur = sheet_for(eid)
                 ans = ask(model, img)
                 print(json.dumps({"eid": eid, "credits": credits_from_answer(ans, t0, n),
                                   "k": ans.get("first_non_story"), "reason": ans.get("reason"),

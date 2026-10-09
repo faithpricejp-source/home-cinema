@@ -101,7 +101,8 @@ class Player:
         start = self._start_position(self.db.get_playback(item_type, item_id))
         return {"ok": True, "path": path, "start_at": start,
                 "title": self._display_title(item_type, item_id),
-                "skip": self.skip_payload(item_type, item_id)}
+                "skip": self.skip_payload(item_type, item_id),
+                "subs": self.db.subtitles_for(item_type, item_id)}
 
     def skip_payload(self, item_type: str, item_id: int) -> dict | None:
         """App 跳过片头片尾用：电影一律 null；剧集给
@@ -136,7 +137,11 @@ class Player:
         return None
 
     def save_progress(self, item_type: str, item_id: int, position: float, duration) -> None:
-        """落库一次进度（两条路共用）：内嵌播放器的 /api/progress 与 IINA 监控线程。"""
+        """落库一次进度（两条路共用）：内嵌播放器的 /api/progress 与 IINA 监控线程。
+        这次没拿到时长时沿用库里已有的，免得把已知时长抹成 NULL、已看被降级。"""
+        if not duration:
+            prev = self.db.get_playback(item_type, item_id)
+            duration = prev["duration_sec"] if prev is not None else None
         self.db.save_playback(item_type, item_id, float(position),
                               float(duration) if duration else None,
                               watched_flag(position, duration))
@@ -188,6 +193,8 @@ class Player:
         seen_position = False
         started = time.monotonic()
         try:
+            # 对端连上后不回包时 readline 会永远阻塞；超时按断开处理（mpv 正常秒回，取轮询间隔的 4 倍、至少 1 秒）
+            sock.settimeout(max(1.0, self._poll_interval * 4))
             reader = sock.makefile("rb")
             while True:
                 pos = self._request_property(reader, sock, "time-pos")
@@ -195,6 +202,11 @@ class Player:
                     break
                 dur = self._request_property(reader, sock, "duration")
                 if dur is _CLOSED:
+                    if pos is not None:  # 刚取到的位置别丢，时长 save_progress 会沿用库里的
+                        try:
+                            self._save(item_type, item_id, pos, None)
+                        except Exception:
+                            pass
                     break
                 if pos is None and dur is None:
                     # 刚启动时片子还在加载（外置硬盘要先转起来），属性同样拿不到；

@@ -22,7 +22,7 @@ A local, Infuse-style media library app for macOS: scans your movie / TV folders
 git clone https://github.com/faithpricejp-source/home-cinema.git
 cd home-cinema
 /opt/homebrew/bin/python3 -m venv .venv
-.venv/bin/pip install fastapi uvicorn httpx pytest numpy
+.venv/bin/pip install fastapi uvicorn httpx pytest numpy opencc-python-reimplemented
 cp config.example.toml config.toml   # then edit it as described in the next section
 macapp/build.sh                      # build Home Cinema.app and copy it to /Applications
 ```
@@ -140,7 +140,8 @@ The credits also have an additional **on-screen text recognition** pass to fill 
 ```bash
 .venv/bin/pip install pyobjc-framework-Vision pyobjc-framework-Quartz pillow
 .venv/bin/python tools/ocr_extract_batch.py        # Capture a frame every 2 seconds during the last 5 minutes of each episode and use macOS Vision to detect text; the feature cache supports resuming
-.venv/bin/python tools/apply_ocr_credits.py        # Preview which episodes will be changed; add --write to save the changes
+.venv/bin/python -m homecinema community-segments  # Query the community databases TheIntroDB / IntroDB (free, anonymous, resumable)
+.venv/bin/python tools/merge_segments.py        # Preview which episodes will be changed; add --write to save the changes
 ```
 
 - Detection (`homecinema/ocr_credits.py`): A frame is considered to show the credits if it has a black background, contains at least two lines of text, is not a full sentence, and is not a station logo. Select the start of the block with the most text frames that ends within the final 90 seconds.

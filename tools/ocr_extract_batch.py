@@ -50,12 +50,11 @@ def targets(gt_only: bool) -> list[tuple[int, str, str]]:
 def work(eid: int, path: str) -> tuple[int, float, str]:
     t0 = time.time()
     try:
-        cache = os.path.join(CACHE, f"{eid}.json")
-        if os.path.exists(cache):
-            return eid, 0.0, "cached"
         dur = probe_duration(path)
         if not dur:
             return eid, 0.0, "no-duration"
+        # Kimi-E-2：缓存是否可用由 load_or_extract 校验源文件 size+mtime 后决定，
+        # 这里不再「缓存文件存在就直接跳过」，否则换源后永远用旧帧特征
         data = load_or_extract(CACHE, eid, path, dur)
         return eid, time.time() - t0, f"ok frames={len(data['frames'])}"
     except Exception as exc:  # 单集失败记日志继续

@@ -356,6 +356,10 @@ def _vote(items: list[tuple[float, float]]) -> tuple[float, float] | None:
     votes = [sum(1 for other in items if overlaps(c, other)) for c in items]
     top = max(votes)
     cluster = [c for c, v in zip(items, votes) if v == top]
+    # 票数并列的可能是互不重叠的两簇：只留与起点最早那个重叠的一簇（并列取起点最早），
+    # 中位数只在簇内平滑边界抖动，不能把两段不相干的区间平均成一个不存在的位置
+    first = min(cluster, key=lambda c: c[0])
+    cluster = [c for c in cluster if overlaps(c, first)]
     if len(cluster) == 1:
         return cluster[0]
     starts = sorted(c[0] for c in cluster)

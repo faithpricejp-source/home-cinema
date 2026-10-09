@@ -46,7 +46,7 @@ def test_index_serves_html(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert "HomeCinema" in resp.text
-    assert "app.css" in resp.text and "app.js" in resp.text
+    assert "app.css?v=" in resp.text and "app.js?v=" in resp.text
 
 
 def test_static_served(client):

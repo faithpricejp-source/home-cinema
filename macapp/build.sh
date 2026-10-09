@@ -3,7 +3,7 @@
 set -e
 here=${0:A:h}
 out=$here/../build
-app="$out/Home Cinema.app"
+app="$out/影院.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 # 不指定 -target 时 swiftc 会按 SDK 版本定最低系统，可能比本机系统还新，导致打不开
 # mpv：头文件在 /opt/homebrew/include/mpv/，库是 /opt/homebrew/lib/libmpv.dylib（Homebrew mpv 0.41）
@@ -15,7 +15,8 @@ cp "$here/Info.plist" "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :HCProjectRoot ${here:h}" "$app/Contents/Info.plist"
 iconset=$out/AppIcon.iconset
 mkdir -p $iconset
-swift "$here/make_icon.swift" $out/icon-1024.png
+# 图标：繁体单字 + 色线
+swift "$here/make_char_icon.swift" 影 B7791F $out/icon-1024.png
 for s in 16 32 128 256 512; do
   sips -z $s $s $out/icon-1024.png --out $iconset/icon_${s}x${s}.png >/dev/null
   sips -z $((s*2)) $((s*2)) $out/icon-1024.png --out $iconset/icon_${s}x${s}@2x.png >/dev/null
@@ -28,5 +29,5 @@ otool -L "$app/Contents/MacOS/HomeCinema" | grep -q libmpv || {
   exit 1
 }
 otool -L "$app/Contents/MacOS/HomeCinema"
-ditto "$app" "/Applications/Home Cinema.app"
-echo "built: /Applications/Home Cinema.app"
+ditto "$app" "/Applications/影院.app"
+echo "built: /Applications/影院.app"

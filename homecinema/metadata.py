@@ -17,11 +17,27 @@ from .db import Library
 _NFO_MAX_BYTES = 2 * 1024 * 1024
 
 
+def aka_titles(detail: dict) -> list[str]:
+    """详情里的别名：当前语种片名、原名、各地中文译名（简繁都留，搜索不做繁简转换）。"""
+    names = [detail.get("title") or detail.get("name"),
+             detail.get("original_title") or detail.get("original_name")]
+    for t in ((detail.get("translations") or {}).get("translations") or []):
+        if t.get("iso_639_1") == "zh":
+            data = t.get("data") or {}
+            names.append(data.get("title") or data.get("name"))
+    out: list[str] = []
+    for n in names:
+        n = (n or "").strip()
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
 class TmdbClient:
     API = "https://api.themoviedb.org/3"
     IMAGE = "https://image.tmdb.org/t/p/"
     # 原图一张 1–5MB，几千张剧照会占好几 GB；按用途取够用的尺寸
-    SIZES = {"poster": "w500", "backdrop": "w1280", "still": "w300"}
+    SIZES = {"poster": "w500", "backdrop": "w1280", "still": "w300", "profile": "w185"}
 
     def __init__(self, api_key: str, language: str = "zh-CN", http=None,
                  sleep=time.sleep, clock=time.monotonic, min_interval: float = 0.25,
@@ -143,22 +159,47 @@ class TmdbClient:
         prefix = [r for r in cands if len(want) >= 5 and any(n.startswith(want) for n in names(r))]
         return sorted(prefix, key=votes)[0] if prefix else None
 
+    # translations 带回各语种片名，用来存简繁中文译名供搜索（同一请求，不多花次数）
     def movie_detail(self, tmdb_id: int, language: str | None = None) -> dict | None:
-        return self._get("/movie/" + str(int(tmdb_id)), {}, language=language)
+        return self._get("/movie/" + str(int(tmdb_id)), {"append_to_response": "translations"},
+                         language=language)
 
     def tv_detail(self, tmdb_id: int, language: str | None = None) -> dict | None:
-        return self._get("/tv/" + str(int(tmdb_id)), {}, language=language)
+        return self._get("/tv/" + str(int(tmdb_id)), {"append_to_response": "translations"},
+                         language=language)
 
     def season_detail(self, tv_id: int, season_number: int,
                       language: str | None = None) -> dict | None:
         return self._get("/tv/" + str(int(tv_id)) + "/season/" + str(int(season_number)),
                          {}, language=language)
 
+    def movie_detail_with(self, tmdb_id: int, append: str | None) -> dict | None:
+        """详情 + append_to_response（如 credits），一次请求带回。"""
+        return self._get("/movie/" + str(int(tmdb_id)), {"append_to_response": append} if append else {})
+
+    def tv_detail_with(self, tmdb_id: int, append: str | None) -> dict | None:
+        return self._get("/tv/" + str(int(tmdb_id)), {"append_to_response": append} if append else {})
+
+    def person_detail(self, person_id: int) -> dict | None:
+        """人物详情（英文）：name 是英文常用名，also_known_as 是不分语言的别名表。"""
+        return self._get("/person/" + str(int(person_id)), {}, language="en-US")
+
+    def collection_detail(self, coll_id: int) -> dict | None:
+        return self._get("/collection/" + str(int(coll_id)), {})
+
+    def external_ids(self, kind: str, tmdb_id: int) -> dict:
+        """IMDb/TVDB 等外部编号；失败返回空 dict。kind: movie / tv。"""
+        return self._get("/" + kind + "/" + str(int(tmdb_id)) + "/external_ids", {}) or {}
+
     def recommendations(self, kind: str, tmdb_id: int) -> list[dict]:
         """TMDB 推荐接口第 1 页；失败/无结果返回空列表。kind: movie / tv。"""
         data = self._get("/" + kind + "/" + str(int(tmdb_id)) + "/recommendations", {})
         results = (data or {}).get("results")
         return results if isinstance(results, list) else []
+
+    def movie_credits(self, tmdb_id: int) -> dict:
+        """GET /movie/{id}/credits；失败返回空 dict。"""
+        return self._get("/movie/" + str(int(tmdb_id)) + "/credits", {}) or {}
 
     def download_image(self, image_path: str, images_dir: Path, kind: str = "poster") -> str | None:
         """下载 TMDB 图片到缓存；文件名 = 尺寸+路径 sha256 前 24 位 + 扩展名。只缓存成功响应。"""
@@ -174,7 +215,16 @@ class TmdbClient:
         content = getattr(resp, "content", b"")
         if resp.status_code == 200 and content:
             images_dir.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(content)
+            # audit N03：tmp + rename 原子落盘。直接 write_bytes 写到 dest 时，
+            # 进程中途被杀会留下截断文件，而上面的命中判断只看 is_file()，
+            # 坏缓存会被永久当成功返回、海报墙一直显示损坏图片。
+            tmp = dest.with_name(dest.name + ".part")
+            try:
+                tmp.write_bytes(content)
+                tmp.replace(dest)
+            finally:
+                # 成功时 tmp 已被 rename 走（不存在，unlink 无副作用）；失败时清掉半成品
+                tmp.unlink(missing_ok=True)
             return name
         return None
 
@@ -409,6 +459,7 @@ class MetadataService:
                 "rating": None, "runtime_minutes": None, "poster_path": None,
                 "backdrop_path": None, "backdrop_cached": None,
                 "poster_cached": fields.get("poster_cached")})
+            self.db.set_aka("movies", row["id"], [])
             return False
         fields.update({
             "tmdb_id": detail.get("id"),
@@ -420,6 +471,12 @@ class MetadataService:
             "backdrop_path": detail.get("backdrop_path"),
             "status": "matched",
         })
+        # 换了匹配对象、或新详情没有图时，旧缓存图是别的片的，不能留（同一部片重拉时保留，免得下载失败把图清掉）
+        rematched = row["tmdb_id"] != detail.get("id")
+        if rematched or not detail.get("poster_path"):
+            fields.setdefault("poster_cached", None)
+        if rematched or not detail.get("backdrop_path"):
+            fields["backdrop_cached"] = None
         if not local and detail.get("poster_path"):
             cached = self.client.download_image(detail["poster_path"], self.images_dir)
             if cached:
@@ -429,6 +486,7 @@ class MetadataService:
             if cached:
                 fields["backdrop_cached"] = cached
         self.db.update_movie_metadata(row["id"], fields)
+        self.db.set_aka("movies", row["id"], aka_titles(detail))
         return True
 
     # ---------- 剧集 ----------
@@ -448,6 +506,9 @@ class MetadataService:
         if tmdb_id is None:
             imdb = parse_nfo_imdbid(folder)
             found = self.client.find_by_imdb(imdb, "tv") if imdb else None
+            # 同电影：nfo 里的 IMDb 号可能指向同名旧版，年份对不上就不信
+            if found and not _year_close(found.get("first_air_date"), row["year"]):
+                found = None
             if not found:
                 found = self.client.search_tv(row["title"], row["year"])
             if found:
@@ -465,6 +526,7 @@ class MetadataService:
                 "rating": None, "runtime_minutes": None, "poster_path": None,
                 "backdrop_path": None, "backdrop_cached": None,
                 "poster_cached": fields.get("poster_cached")})
+            self.db.set_aka("shows", row["id"], [])
             return False
         episode_runtime = (detail.get("episode_run_time") or [None])
         fields.update({
@@ -477,6 +539,12 @@ class MetadataService:
             "backdrop_path": detail.get("backdrop_path"),
             "status": "matched",
         })
+        # 换了匹配对象、或新详情没有图时，旧缓存图是别的片的，不能留（同一部片重拉时保留，免得下载失败把图清掉）
+        rematched = row["tmdb_id"] != detail.get("id")
+        if rematched or not detail.get("poster_path"):
+            fields.setdefault("poster_cached", None)
+        if rematched or not detail.get("backdrop_path"):
+            fields["backdrop_cached"] = None
         if not local and detail.get("poster_path"):
             cached = self.client.download_image(detail["poster_path"], self.images_dir)
             if cached:
@@ -485,8 +553,6 @@ class MetadataService:
             cached = self.client.download_image(detail["backdrop_path"], self.images_dir, "backdrop")
             if cached:
                 fields["backdrop_cached"] = cached
-        self.db.update_show_metadata(row["id"], fields)
-
         show_id = row["id"]
         detail_id = detail.get("id")
         for s in detail.get("seasons") or []:
@@ -497,9 +563,14 @@ class MetadataService:
                                   episode_count=s.get("episode_count"),
                                   poster_path=s.get("poster_path"))
         local_seasons = sorted({e["season_number"] for e in self.db.episodes_for_show(show_id)})
+        # audit N02：集级失败不能被剧级 matched 掩盖。季详情请求失败（重试耗尽）时若照常
+        # 标 matched，之后每次默认 fetch-metadata 都整剧跳过，集元数据永远停在扫描器文件名。
+        # 这里先记下来，等季都处理完再决定要不要标 matched。
+        season_failed = False
         for sn in local_seasons:
             sdata = self.client.season_detail(detail_id, sn)
             if not sdata:
+                season_failed = True
                 continue
             self.db.upsert_season(show_id, sn, name=sdata.get("name"))
             by_number = {e.get("episode_number"): e for e in (sdata.get("episodes") or [])}
@@ -522,4 +593,28 @@ class MetadataService:
                     if cached:
                         ep_fields["still_cached"] = cached
                 self.db.update_episode_metadata(ep["id"], ep_fields)
+        if season_failed:
+            # 留着 status 不变（unmatched），下一轮默认补元数据会重试这一季
+            return False
+        self.db.update_show_metadata(row["id"], fields)
+        self.db.set_aka("shows", row["id"], aka_titles(detail))
         return True
+
+
+def fill_aka(db: Library, client: TmdbClient, refresh: bool = False, progress=None) -> dict:
+    """给已匹配的电影/剧集补中文译名（老库升级用；补元数据时已顺带写入）。"""
+    stats = {"ok": 0, "failed": 0, "total": 0}
+    jobs = [("movies", r, client.movie_detail) for r in db.movies_for_metadata(include_matched=True)]
+    jobs += [("shows", r, client.tv_detail) for r in db.shows_for_metadata(include_matched=True)]
+    jobs = [j for j in jobs if j[1]["tmdb_id"] and (refresh or j[1]["aka"] is None)]
+    stats["total"] = len(jobs)
+    for i, (table, row, fetch) in enumerate(jobs, 1):
+        detail = fetch(row["tmdb_id"])
+        if detail:
+            db.set_aka(table, row["id"], aka_titles(detail))
+            stats["ok"] += 1
+        else:
+            stats["failed"] += 1
+        if progress:
+            progress(i, len(jobs), row["title"])
+    return stats

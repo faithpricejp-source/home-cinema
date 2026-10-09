@@ -98,7 +98,14 @@ def _read_cache(path: Path) -> list[dict] | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or _older_than_days(data.get("fetched_at"), CACHE_TTL_DAYS):
+    if not isinstance(data, dict):
+        return None
+    stamp = data.get("fetched_at")
+    try:  # 缺写入时间或写入时间读不懂的缓存一律按过期处理（_older_than_days 对空值是「不过期」）
+        datetime.fromisoformat(str(stamp))
+    except ValueError:
+        return None
+    if not stamp or _older_than_days(stamp, CACHE_TTL_DAYS):
         return None
     results = data.get("results")
     return results if isinstance(results, list) else None
@@ -181,15 +188,82 @@ def _row(kind: str, cand: dict, poster: str | None, generated_at: str) -> dict:
         "poster_cached": poster, "vote_average": item.get("vote_average"),
         "vote_count": item.get("vote_count"), "score": cand["score"],
         "because": json.dumps(cand["because"], ensure_ascii=False),
+        "fit": cand.get("fit"),
         "generated_at": generated_at,
     }
+
+
+# ---------- 按口味重排（可选第二步，只作用于电影） ----------
+
+def _movie_directors(client, cache_dir: Path, tmdb_id: int, refresh: bool) -> list[str]:
+    """候选导演名列表：GET /movie/{id}/credits 的 crew 里 job==Director。
+
+    缓存走 recs/credits_{id}.json（同 recommendations 的 7 天缓存方式）；
+    空结果不缓存（网络失败与真无导演无法区分，缓存空会让该候选 7 天拿不到导演）。
+    任何失败都返回空列表，不影响重排。
+    """
+    path = _cache_path(cache_dir, "credits", tmdb_id)
+    if not refresh:
+        cached = _read_cache(path)
+        if cached is not None:
+            return [str(n) for n in cached if n]
+    try:
+        credits = client.movie_credits(int(tmdb_id))
+    except Exception:
+        return []
+    if not isinstance(credits, dict):
+        return []
+    names: list[str] = []
+    for member in credits.get("crew") or []:
+        if isinstance(member, dict) and member.get("job") == "Director":
+            name = member.get("name")
+            if name and name not in names:
+                names.append(str(name))
+    if names:
+        _write_cache(path, names)
+    return names
+
+
+def _rerank_movie_picked(db: Library, picked: list[dict], llm_call,
+                         client, cache_dir: Path, refresh: bool) -> list[dict]:
+    """二段重排：最终分写回 score，fit 单独落列，why 追加在推荐理由之后。"""
+    from . import rerank as rerank_mod
+    profile = rerank_mod.taste_profile(db)
+    candidates = []
+    for cand in picked:
+        item = cand["item"]
+        candidates.append({"tmdb_id": int(item["id"]),
+                           "title": _title(item, "movie"),
+                           "original_title": _original_title(item, "movie"),
+                           "year": _year(item, "movie"),
+                           "overview": item.get("overview") or "",
+                           "directors": _movie_directors(client, cache_dir,
+                                                         int(item["id"]), refresh),
+                           "score": cand["score"],
+                           "cand": cand})
+    ranked = rerank_mod.rerank_movies(candidates, profile,
+                                      llm_call or rerank_mod.default_llm_call)
+    out: list[dict] = []
+    for entry in ranked:
+        cand = entry["cand"]
+        cand["score"] = entry["final_score"]
+        cand["fit"] = entry["fit"]
+        if entry["why"]:
+            cand["because"].append(entry["why"])
+        out.append(cand)
+    return out
 
 
 # ---------- 入口 ----------
 
 def generate(db: Library, client, cache_dir, images_dir, refresh: bool = False,
-             progress=None) -> dict:
-    """汇总来源推荐 → 打分过滤 → 整批落库；返回 {"movies", "shows", "sources"}。"""
+             progress=None, rerank: bool = False, llm_call=None) -> dict:
+    """汇总来源推荐 → 打分过滤（电影可选按口味重排）→ 整批落库。
+
+    返回 {"movies", "shows", "sources"}。rerank=True 时电影候选二段重排
+    （见 rerank.py）；剧集不受影响，默认关闭时行为与旧版完全一致。
+    llm_call 供测试注入假实现，默认走 free_llm.chat。
+    """
     cache_dir = Path(cache_dir)
     images_dir = Path(images_dir)
     sources = _collect_sources(db)
@@ -203,6 +277,8 @@ def generate(db: Library, client, cache_dir, images_dir, refresh: bool = False,
         results = _recommendations(client, cache_dir, kind, src["tmdb_id"], refresh)
         bucket = buckets[kind]
         for rank, item in enumerate(results):
+            if not isinstance(item, dict):
+                continue  # Kimi-E-3：缓存文件可能被手工改坏/混入非对象，跳过，不中止整轮推荐
             cid = item.get("id")
             if cid is None:
                 continue
@@ -218,6 +294,9 @@ def generate(db: Library, client, cache_dir, images_dir, refresh: bool = False,
     counts: dict[str, int] = {}
     for kind, limit in (("movie", MOVIE_LIMIT), ("tv", SHOW_LIMIT)):
         picked = _finalize(buckets[kind], owned[kind], dismissed, kind)[:limit]
+        if rerank and kind == "movie" and picked:
+            picked = _rerank_movie_picked(db, picked, llm_call, client,
+                                          cache_dir, refresh)
         for cand in picked:
             poster = None
             if cand["item"].get("poster_path"):

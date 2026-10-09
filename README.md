@@ -10,6 +10,22 @@ A local, Infuse-style media library app for macOS: scans your movie / TV folders
 - 后端 Python（FastAPI + SQLite），前端原生 HTML/CSS/JS（无构建、无 CDN），服务只监听 `127.0.0.1:8770`。
 - 也可以只用浏览器打开 `http://127.0.0.1:8770`，此时播放交给 IINA。
 
+## 为什么做这个
+
+这是「个人操作系统」系列中的一个 App。这个系列只有一个目标：把我和外界之间每一次信息往来的动作和历史都留在自己手里——看了什么、在哪里停留了多久、点了什么、买了什么、卖了什么、看完之后做了什么。
+
+普通人的行为受各种已知和未知的条件、环境与刺激影响，处在一种伪随机的状态里，就像别人在我们身上装了开关：这个开关一拨、那根弦一拨，我们就做出别人预期中的动作。自己感觉像随机，在别人眼里却像提线木偶。平台和机构握着我们的行为数据，比我们更了解自己。这一整套东西，就是为了改变这个状况。
+
+背后的想法是：个人对外部世界的理解好比一滴水去理解大海，几乎不可能做到。但一滴水向内看，看清自己的每个分子怎么动，是做得到的——什么温度下我会怎么动，遇到什么潮汐、什么洋流又会怎么动。把这些搞清楚，就能为自己争取更好的生存条件。这比理解整个大海现实得多。
+
+这滴水自己的状态也要记下来。同一个人，前一晚没睡好、当天和家人吵了架、身体不舒服的时候，重大决定出错的概率明显更高，很多人的回忆录里都写到过这样的时刻。所以除了记录动作，还要记录当时的身体、情绪和外部环境（天气、行情、日程），之后才看得出「在什么状态下，我会怎么做」。
+
+这些 App 的后台最终要打通、互相共享信息。大型金融集团早就这样对待每一个客户：把他在存款、贷款、保险、证券上的行为合在一起看，再做交叉销售。有了 AI，个人没有理由不能对自己做同样的事——区别是这一次，数据和分析只为自己服务。目前每个 App 各用一个本机 SQLite 库，打通是下一步。
+
+理想的最终状态是：所有能接触到我的信息，都要先经过我自己做的过滤网和记录器才能进来；我的反馈和行为，也要先经过我自己的过滤网和保护器才能发出去。
+
+所以这个系列的共同约定是：所有行为记录写进本机数据库，不上传任何第三方；AI 分析在本机或用户自己选择的服务上运行。
+
 ## 依赖
 
 - macOS 13+，Apple Silicon（Intel 未测）
@@ -24,7 +40,7 @@ A local, Infuse-style media library app for macOS: scans your movie / TV folders
 git clone https://github.com/faithpricejp-source/home-cinema.git
 cd home-cinema
 /opt/homebrew/bin/python3 -m venv .venv
-.venv/bin/pip install fastapi uvicorn httpx pytest numpy
+.venv/bin/pip install fastapi uvicorn httpx pytest numpy opencc-python-reimplemented
 cp config.example.toml config.toml   # 然后按下一节编辑
 macapp/build.sh                      # 编译 Home Cinema.app 并拷到 /Applications
 ```
@@ -131,7 +147,9 @@ libmpv 初始化失败（如 dylib 被改名/损坏、render context 创建失�
 ```bash
 .venv/bin/pip install pyobjc-framework-Vision pyobjc-framework-Quartz pillow
 .venv/bin/python tools/ocr_extract_batch.py        # 每集最后 5 分钟每 2 秒截一帧，macOS Vision 数文字，特征缓存可续跑
-.venv/bin/python tools/apply_ocr_credits.py        # 预览会改哪些集；加 --write 落库
+.venv/bin/python -m homecinema community-segments  # 查社区库 TheIntroDB / IntroDB（免费匿名，可续跑）
+.venv/bin/python -m homecinema community-segments --retry-none --limit 300  # 只重查库里记为「没有」的集（最旧优先）
+.venv/bin/python tools/merge_segments.py        # 预览会改哪些集；加 --write 落库
 ```
 
 - 判定（`homecinema/ocr_credits.py`）：黑底、至少两行字、不是整句话、不是台标的帧算演职员表，

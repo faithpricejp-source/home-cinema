@@ -21,6 +21,8 @@ def cfg(tmp_path) -> Config:
         db_path=str(tmp_path / "lib.db"),
         cache_dir=str(tmp_path / "cache"),
         tmdb_key_file=str(tmp_path / "tmdb-key.txt"),
+        assrt_token_file=str(tmp_path / "assrt-token.txt"),
+        theintrodb_key_file=str(tmp_path / "tidb-key.txt"),
         tmdb_language="zh-CN",
         port=8770,
         iina_cli="/fake/iina-cli",

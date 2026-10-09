@@ -176,9 +176,12 @@ def _as_range(value):
         end = value.get("end", value.get("intro_end", value.get("credits_end")))
         if start is None or end is None:
             return None
-        return (float(start), float(end))
+    else:
+        try:
+            start, end = value[0], value[1]
+        except (TypeError, IndexError, KeyError):
+            return None
     try:
-        start, end = value[0], value[1]
-    except (TypeError, IndexError, KeyError):
+        return (float(start), float(end))
+    except (TypeError, ValueError):  # 形状对但值不是数：当作没有结果，不让整批检测崩掉
         return None
-    return (float(start), float(end))

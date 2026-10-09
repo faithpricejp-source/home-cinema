@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
+
+from .segments import _tool  # Kimi-E-6：ffmpeg 解析复用 segments 的 PATH+Homebrew 回退
 
 TAIL_SEC = 300.0      # 只看最后 5 分钟（标准答案里片尾起点离结尾最远 188 秒）
 STEP_SEC = 2.0        # 截帧间隔
@@ -27,7 +30,7 @@ def extract(path: str, duration: float, tail_sec: float = TAIL_SEC,
     """返回 {"duration", "start", "step", "frames": [{"t", "dark", "lines": [[text, x, y, w, h]...]}]}。"""
     start = max(0.0, duration - tail_sec)
     with tempfile.TemporaryDirectory(prefix="hc-ocr-") as tmp:
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+        cmd = [_tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
                "-hwaccel", "videotoolbox", "-ss", f"{start:.3f}", "-i", path,
                "-an", "-sn", "-vf", f"fps=1/{step},scale={FRAME_WIDTH}:-2",
                "-q:v", "4", os.path.join(tmp, "f%05d.jpg")]
@@ -79,13 +82,35 @@ def recognize(image_path: str) -> list[list]:
     return lines
 
 
+def fingerprint(st: os.stat_result) -> dict:
+    """源文件指纹（Kimi-E-2）：size+mtime。缓存 JSON 的 "file" 字段即此。"""
+    return {"size": st.st_size, "mtime": st.st_mtime}
+
+
+def cache_matches(cached, st: os.stat_result | None) -> bool:
+    """缓存能否沿用。源文件 stat 不到（未挂载/已删）→ 沿用（反正无法重算）；
+    旧格式缓存没有指纹 → 沿用（否则存量库要一次性全量重截帧）；有指纹 → 必须与源一致。"""
+    src = cached.get("file") if isinstance(cached, dict) else None
+    return (st is None or not src
+            or (src.get("size") == st.st_size and src.get("mtime") == st.st_mtime))
+
+
 def load_or_extract(cache_dir: str, episode_id: int, path: str, duration: float) -> dict:
     os.makedirs(cache_dir, exist_ok=True)
     cache = os.path.join(cache_dir, f"{episode_id}.json")
+    try:
+        st = os.stat(path)
+    except OSError:
+        st = None
     if os.path.exists(cache):
         with open(cache, encoding="utf-8") as fh:
-            return json.load(fh)
+            cached = json.load(fh)
+        # Kimi-E-2：换源（重编码/换版本，路径与集 id 不变）后指纹对不上就重算，不沿用旧帧特征
+        if cache_matches(cached, st):
+            return cached
     data = extract(path, duration)
+    if st is not None:
+        data["file"] = fingerprint(st)
     tmp = cache + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False)
@@ -115,6 +140,14 @@ def _sentence(text: str) -> bool:
     return sum(1 for w in text.split() if w.isalpha() and w.islower()) >= 4
 
 
+_DIALOG = re.compile(r"(\?|!|？|！|\.\.\.|…)[\"'”’」』]?$|♪")  # 10-05 审计 F03：全角 ？！
+
+
+def _dialog(text: str) -> bool:
+    """台词字幕：以问号、叹号、省略号结尾，或带音符（歌词）。暗场里的对白字幕会被当成演职员表。"""
+    return bool(_DIALOG.search(text.strip()))
+
+
 def _watermarks(frames: list[dict]) -> set:
     """同一位置同一串字出现在三成以上的帧里：台标/水印，判定时忽略。"""
     from collections import Counter
@@ -133,7 +166,7 @@ def credit_frame(frame: dict, min_dark: float = MIN_DARK, ignore: set = frozense
     if frame["dark"] < min_dark:
         return False
     good = [ln for ln in frame["lines"] if _good_line(ln) and _wm_key(ln) not in ignore]
-    if not good or any(_sentence(ln[0]) for ln in good):
+    if not good or any(_sentence(ln[0]) or _dialog(ln[0]) for ln in good):
         return False
     above = [ln for ln in good if ln[2] + ln[4] > SUBTITLE_TOP]
     # 演职员表至少两行（职务 + 名字）；只有底部的字是字幕，不算

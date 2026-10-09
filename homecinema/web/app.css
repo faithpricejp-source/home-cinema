@@ -173,7 +173,21 @@ select.sort {
 }
 
 /* min-width:0：否则长片名（nowrap）会把卡片撑宽，海报按 2:3 跟着变高 */
-.card { display: block; min-width: 0; }
+.card { display: block; min-width: 0; position: relative; }
+
+/* 同片多版本角标（海报墙/列表/最近添加卡片左上角） */
+.ver-badge {
+  position: absolute; top: 6px; left: 6px; z-index: 1;
+  background: rgba(0, 0, 0, 0.72); color: #fff;
+  font-size: 11px; padding: 2px 7px; border-radius: 999px;
+}
+
+/* 详情页版本行的「默认」标签 */
+.ver-tag {
+  background: var(--raised); color: var(--muted);
+  font-size: 11px; padding: 1px 7px; border-radius: 999px;
+}
+.ver-default .ep-name { font-weight: 600; }
 
 .card .poster {
   width: 100%;
@@ -516,3 +530,117 @@ select.sort {
 select.sort:focus-visible,
 .ep-row:focus-visible,
 .rec-dismiss:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- 筛选 / 人物 / 合集 / 日历 ---------- */
+
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn.chip { padding: 4px 12px; font-size: 13px; }
+.btn.chip.on { background: var(--accent); color: #1F1E1D; border-color: var(--accent); }
+
+.credit-line { color: var(--text); margin: 6px 0; font-size: 14px; }
+.dim { color: var(--muted); }
+.link { color: var(--accent); }
+.link:hover { color: var(--accent-hover); text-decoration: underline; }
+
+.people-row { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 6px; }
+.person { flex: 0 0 96px; text-align: center; min-width: 0; }
+.avatar { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; background: var(--raised); }
+.avatar.ph { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 28px; }
+.avatar.big { width: 140px; height: 140px; flex: 0 0 140px; }
+.person-name { font-size: 13px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person-role { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person:hover .person-name { color: var(--accent); }
+.person-head { display: flex; gap: 24px; align-items: center; margin: 12px 0 28px; }
+.person-head h1 { font-family: var(--serif); margin: 0 0 4px; }
+.person-card .poster { object-fit: cover; }
+
+.missing-card { opacity: 0.45; }
+.missing-card:hover { opacity: 0.8; }
+
+.cal-row {
+  display: grid; grid-template-columns: 44px 1fr auto; gap: 14px; align-items: center;
+  padding: 10px 12px; border-radius: var(--radius); background: var(--panel); margin-bottom: 8px;
+}
+.cal-row:hover { background: var(--raised); }
+.cal-poster { width: 44px; aspect-ratio: 2 / 3; border-radius: 6px; object-fit: cover; }
+.cal-poster.ph { display: flex; align-items: center; justify-content: center; background: var(--raised); color: var(--muted); }
+.cal-row .ep-side { text-align: right; font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+.person:focus-visible, .cal-row:focus-visible, .btn.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 700px) {
+  .filters { width: 100%; }
+  .avatar.big { width: 96px; height: 96px; flex-basis: 96px; }
+}
+
+/* ---------- 10-foot 焦点导航（遥控器方向键） ---------- */
+
+/* 焦点卡片：放大 + 描边 + 投影，颜色沿用 --accent。
+   .nav-focus 由 app.js 的方向键处理加上；:focus-visible 兜住鼠标点击后的焦点。
+   海报墙卡片没有背景，描边落在海报上；其余几类整块都有底色，直接描边。 */
+.card.nav-focus {
+  transform: translateY(-5px) scale(1.03);
+}
+
+.card.nav-focus .poster {
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+  transform: scale(1.04);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cw-card.nav-focus,
+.person.nav-focus,
+.ep-row.nav-focus,
+.cal-row.nav-focus {
+  position: relative;
+  z-index: 2;
+  transform: translateY(-5px) scale(1.03);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.person.nav-focus .avatar {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.ep-row.nav-focus,
+.cal-row.nav-focus { background: var(--raised); }
+
+/* 焦点不只靠描边：焦点元素的标题也用主色，远距离一眼能找到 */
+.card.nav-focus .card-t,
+.ep-row.nav-focus .ep-name { color: var(--accent); }
+
+/* 键盘 Tab 到的卡片（没有经过方向键逻辑）也要有同样的可见焦点 */
+.card:focus-visible,
+.cw-card:focus-visible,
+.person:focus-visible,
+.ep-row:focus-visible,
+.cal-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 减少动态偏好：焦点仍要看得见，但不做位移动画 */
+@media (prefers-reduced-motion: reduce) {
+  .card.nav-focus, .cw-card.nav-focus, .person.nav-focus, .ep-row.nav-focus, .cal-row.nav-focus,
+  .card.nav-focus .poster { transform: none; }
+}
+
+/* ---------- 字幕 ---------- */
+.sub-box { margin-top: 10px; }
+.warn { color: var(--accent); }
+.sub-own { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; margin: 4px 0; }
+.sub-file { background: var(--panel); padding: 2px 10px; border-radius: 6px; }
+button.link { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
+.sub-results { margin-top: 8px; }
+.sub-cand { display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  padding: 8px 12px; background: var(--panel); border-radius: 8px; margin-bottom: 6px; }
+.small { font-size: 12px; margin-top: 4px; }
+.ep-subs { background: var(--raised); color: var(--muted); border: 0; border-radius: 6px;
+  padding: 2px 8px; margin-left: 8px; cursor: pointer; font-size: 12px; }
+.ep-subs:hover, .ep-subs:focus-visible { color: var(--text); background: var(--accent); }

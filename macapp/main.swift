@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var progressTimer: Timer?
     var playback: (type: String, id: Int, title: String)?
     var isEndingPlayback = false
+    var endedByNaturalEOF = false  // 本次结束是 mpv 自然 EOF（core 已 idle），区别于跳过片尾
     var switchingEpisode = false
 
     // 跳过片头片尾状态（每一集开始时重置）
@@ -179,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             contentRect: NSRect(x: 0, y: 0, width: w, height: h),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
-        window.title = "Home Cinema"
+        window.title = "影院"
         window.delegate = self
         window.titlebarAppearsTransparent = true
         window.appearance = NSAppearance(named: .darkAqua)
@@ -212,12 +213,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // 外部链接（如 TMDB）用默认浏览器开，不在窗口里跳走
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let url = action.request.url, url.host != "127.0.0.1", url.scheme?.hasPrefix("http") == true {
-            NSWorkspace.shared.open(url)
-            decisionHandler(.cancel)
+        guard let url = action.request.url, let scheme = url.scheme?.lowercased() else {
+            decisionHandler(.allow)
             return
         }
-        decisionHandler(.allow)
+        if scheme == "http" || scheme == "https" {
+            if url.host != "127.0.0.1" {
+                NSWorkspace.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+            return
+        }
+        // 10-05 审计 S07：只放行本机页面与 about:blank，其他 scheme 一律拒绝
+        decisionHandler(scheme == "about" ? .allow : .cancel)
     }
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
@@ -236,7 +246,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         else { return }
         let startAt = body["start_at"] as? Double ?? 0
         startEmbeddedPlayback(type: type, id: id, path: path, startAt: startAt, title: title,
-                              skip: Self.parseSkip(body["skip"]))
+                              skip: Self.parseSkip(body["skip"]),
+                              subs: body["subs"] as? [String] ?? [])
     }
 
     /// 解析 /api/play 返回里的 skip：{"intro": [s,e] 或 null, "credits_start": 秒 或 null}。
@@ -251,7 +262,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func startEmbeddedPlayback(type: String, id: Int, path: String, startAt: Double, title: String,
-                               skip: (intro: (Double, Double)?, creditsStart: Double?)) {
+                               skip: (intro: (Double, Double)?, creditsStart: Double?),
+                               subs: [String] = []) {
         // 播放中又点了另一个条目：不补发进度（周期上报最多差 5 秒），直接换片
         if let current = playerView {
             progressTimer?.invalidate(); progressTimer = nil
@@ -277,7 +289,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                 self.switchingEpisode = false
                 return
             }
-            self.playbackDidEnd(eof: reason == .eof)
+            if reason == .eof { self.endedByNaturalEOF = true }
+            // Kimi-F-1：mpv 侧打不开文件（服务端 missing 校验之后才失效）要给一句提示，
+            // 不再和「用户按 ESC」一样静默回海报墙
+            let failMessage = reason == .error ? "无法播放：" + (self.playback?.title ?? "") : nil
+            self.playbackDidEnd(eof: reason == .eof, message: failMessage)
         }
         view.onMpvShutdown = { [weak self] in self?.playbackDidEnd(eof: false) }
         view.onPosition = { [weak self] position in self?.handlePosition(position) }
@@ -296,7 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.makeFirstResponder(view)
         window.title = title
         applyFloatWhilePlaying()
-        view.load(path: path, start: startAt, title: title)
+        view.load(path: path, start: startAt, title: title, subs: subs)
 
         progressTimer?.invalidate()
         progressTimer = Timer.scheduledTimer(timeInterval: 5, target: self,
@@ -322,6 +338,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// ESC 的结束语义：全屏先退全屏，第二次 ESC 才结束播放。
     func handleEscape() {
         guard playerView != nil else { return }
+        // 10-05 审计 S03：自动接下一集途中（等服务回应）按 ESC 直接收尾，在途回调会自然作废
+        if isEndingPlayback {
+            teardownPlayerAndRefresh()
+            return
+        }
         if window.styleMask.contains(.fullScreen) {
             window.toggleFullScreen(nil)
             return
@@ -331,10 +352,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     /// 播放结束（ESC / 用户退出 / 播完）：先 POST 最后一次进度，剧集播完尝试自动下一集，
     /// 否则移除播放层回到网页并刷新。
-    func playbackDidEnd(eof: Bool) {
+    func playbackDidEnd(eof: Bool, message: String? = nil) {
         guard playerView != nil, !isEndingPlayback else { return }
         isEndingPlayback = true
         progressTimer?.invalidate(); progressTimer = nil
+        playerView?.pause()  // 10-05 审计 S05：收尾期间（等服务回应）先停住音画
 
         let finished = playback
         let view = playerView
@@ -346,7 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             if eof, finished?.type == "episode", let episodeId = finished?.id {
                 self.autoNextAfter(episodeId: episodeId)
             } else {
-                self.teardownPlayerAndRefresh()
+                self.teardownPlayerAndRefresh(message: message)  // Kimi-F-1：把失败原因带到海报墙
             }
         }
     }
@@ -386,16 +408,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                   let startAt = obj["start_at"] as? Double,
                   let view = self.playerView
             else {
-                self.teardownPlayerAndRefresh()
+                // 10-05 审计 S06：下一集起不来（如 409 文件不在原位）给一句提示，不再静默回海报墙
+                var msg = "下一集无法播放"
+                if let data = data,
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let detail = obj["detail"] as? String { msg += "：" + detail }
+                self.teardownPlayerAndRefresh(message: msg)
                 return
             }
             self.isEndingPlayback = false
-            self.switchingEpisode = true  // loadfile replace 会对旧文件发非 EOF 的 END_FILE，要忽略
+            // loadfile replace 会对旧文件发非 EOF 的 END_FILE，要忽略一次——但自然播完时 core 已进 idle，
+            // 不会再发，这时置 true 会把下一集的加载失败吞掉（10-05 审计 A1）
+            self.switchingEpisode = !self.endedByNaturalEOF
+            self.endedByNaturalEOF = false
             self.playback = (type: "episode", id: id, title: title)
             self.window.title = title
             let skip = Self.parseSkip(obj["skip"])
             self.resetSkipState(intro: skip.intro, creditsStart: skip.creditsStart, startAt: startAt)
-            view.load(path: path, start: startAt, title: title)
+            view.load(path: path, start: startAt, title: title, subs: obj["subs"] as? [String] ?? [])
             self.progressTimer = Timer.scheduledTimer(timeInterval: 5, target: self,
                                                       selector: #selector(self.progressTick),
                                                       userInfo: nil, repeats: true)
@@ -403,8 +433,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     /// 移除播放层、恢复窗口标题、通知网页刷新「继续观看」和进度条。
-    func teardownPlayerAndRefresh() {
+    func teardownPlayerAndRefresh(message: String? = nil) {
         progressTimer?.invalidate(); progressTimer = nil
+        endedByNaturalEOF = false
         if let view = playerView {
             view.stop()
             view.removeFromSuperview()
@@ -418,9 +449,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         introSkipped = false
         creditsHandled = false
         window.makeFirstResponder(webView)
-        window.title = "Home Cinema"
+        window.title = "影院"
         window.level = .normal  // 回到海报墙就不再置顶
         webView.evaluateJavaScript("window.homecinemaRefresh && window.homecinemaRefresh()")
+        if let message = message,
+           let data = try? JSONSerialization.data(withJSONObject: [message]),
+           let arr = String(data: data, encoding: .utf8) {
+            webView.evaluateJavaScript("window.homecinemaToast && window.homecinemaToast(\(arr)[0])")
+        }
     }
 
     // MARK: 跳过片头片尾（菜单「显示」开关，默认开；跳过逻辑见 handlePosition）
@@ -434,6 +470,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         skipIntroOutro.toggle()
         sender.state = skipIntroOutro ? .on : .off
         // 关掉开关时无需额外动作：handlePosition 每次都看开关，正在播放的这一集立刻不再跳过
+        if skipIntroOutro {
+            // Kimi-F-2：打开开关不追溯正在播放的这一集。否则位置已在片尾区时（关着开关看到片尾
+            // 再打开），下一个 time-pos 就进 handlePosition 的片尾分支 → playbackDidEnd(eof: true)：
+            // 按看到结尾记进度、标成已看、自动切下一集。只对之后的集生效。
+            introSkipped = true
+            creditsHandled = true
+        }
     }
 
     /// 每集（含自动下一集）开始时重置跳过状态。起播位置已经进了片头就视为已跳过，
@@ -504,7 +547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
               let position = view.currentPosition else { return }
         var req = URLRequest(url: baseURL.appendingPathComponent("api/progress"))
         req.httpMethod = "POST"
-        req.timeoutInterval = 5
+        req.timeoutInterval = 3  // 10-05 审计 S04：与下面的等待时长对齐
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var body: [String: Any] = ["type": pb.type, "id": pb.id, "position": position]
         if let duration = view.currentDuration {
@@ -515,7 +558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         let semaphore = DispatchSemaphore(value: 0)
         URLSession.shared.dataTask(with: req) { _, _, _ in semaphore.signal() }.resume()
-        _ = semaphore.wait(timeout: .now() + 2)
+        _ = semaphore.wait(timeout: .now() + 3)
     }
 
     @discardableResult
@@ -546,11 +589,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
         let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "关于 Home Cinema",
+        appMenu.addItem(withTitle: "关于影院",
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "隐藏 Home Cinema", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "退出 Home Cinema", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "隐藏影院", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "退出影院", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
 
         let editItem = NSMenuItem(); main.addItem(editItem)

@@ -289,7 +289,7 @@ function makeApp(opts) {
     "state: state, route: route, renderHome: renderHome, renderList: renderList," +
     "renderMovie: renderMovie, renderShow: renderShow, renderRecs: renderRecs," +
     "cardHTML: cardHTML, continueCardHTML: continueCardHTML, recCardHTML: recCardHTML," +
-    "epRowHTML: epRowHTML, posterHTML: posterHTML, barHTML: barHTML, esc: esc, fmt: fmt," +
+    "epRowHTML: epRowHTML, versionRowHTML: versionRowHTML, fmtSize: fmtSize, posterHTML: posterHTML, barHTML: barHTML, esc: esc, fmt: fmt," +
     "fmtTime: fmtTime, imgUrl: imgUrl, apiCall: apiCall, playItem: playItem," +
     "startRecRefresh: startRecRefresh, bindRecEvents: bindRecEvents, toast: toast," +
     "errorHTML: errorHTML, loadingHTML: loadingHTML, inEmbeddedApp: inEmbeddedApp});\n";
