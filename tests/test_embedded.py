@@ -37,7 +37,7 @@ def make_client(tmp_path, cfg, lib):
 
     player = Player(lib, cfg, launcher=launcher, poll_interval=0.05, connect_deadline=1.0)
     app = create_app(config=cfg, db=lib, player=player, scan_service=ScanService(cfg, lib))
-    tc = TestClient(app)
+    tc = TestClient(app, base_url="http://127.0.0.1")
     tc.calls = calls  # type: ignore[attr-defined]
     tc.lib = lib  # type: ignore[attr-defined]
     tc.player = player  # type: ignore[attr-defined]

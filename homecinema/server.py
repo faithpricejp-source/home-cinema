@@ -8,9 +8,10 @@ import os
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -36,6 +37,54 @@ try:  # pragma: no cover - 取决于运行环境是否装了 httpx
     _ASSRT_TRANSPORT_ERRORS = (OSError, _httpx.TransportError)
 except ImportError:  # pragma: no cover
     pass
+
+
+_UNSAFE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+_MAX_BODY = 50 * 1024 * 1024
+
+
+def _cross_site(headers: dict[str, str]) -> str | None:
+    """跨站请求防护（2026-10-09，云端审查发现）：不拦的话，浏览器里任意网页都能用 text/plain 的
+    「简单请求」POST 到 127.0.0.1，替用户启动扫描、拉元数据、播放、改已看/收藏、下载字幕。
+    规则：① 只收 application/json（跨站发 JSON 必须先预检，本服务不答预检，浏览器就会拦下）；
+    ② 带 Origin 头时，Origin 的主机必须和 Host 头一致；③ Host 只认本机与 Tailscale 名字（挡 DNS 重绑定）。"""
+    host = headers.get("host", "").lower()
+    hostname = host.rsplit(":", 1)[0] if not host.startswith("[") else host
+    if hostname not in ("127.0.0.1", "localhost", "[::1]") and not hostname.endswith(".ts.net"):
+        return f"host not allowed: {host}"
+    ctype = headers.get("content-type", "").split(";")[0].strip().lower()
+    if ctype != "application/json":
+        return "content-type must be application/json"
+    origin = headers.get("origin")
+    if origin and urlparse(origin).netloc.lower() != host:
+        return f"cross-origin request refused: {origin}"
+    return None
+
+
+class CrossSiteGuard:
+    """纯 ASGI 中间件，只看请求头、不读请求体（避开 BaseHTTPMiddleware 读 body 的坑）。
+    写方法先过 _cross_site（403），再查 Content-Length（为负/非数字/超 50MB → 400）。
+    「请求体必须是 JSON 对象」由各端点的 pydantic 模型保证（数组等会得到 422 JSON）；
+    无请求体的端点（/api/scan 等）本来就不读 body。"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["method"] in _UNSAFE_METHODS:
+            headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+            bad, status = _cross_site(headers), 403
+            if bad is None:
+                try:
+                    n = int(headers.get("content-length") or 0)
+                except ValueError:
+                    n = -1
+                if n < 0 or n > _MAX_BODY:
+                    bad, status = "bad Content-Length", 400
+            if bad:
+                await JSONResponse({"detail": bad}, status_code=status)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 class PlayBody(BaseModel):
@@ -511,6 +560,7 @@ def create_app(config: Config | None = None, db: Library | None = None,
         airing_service = AiringService(config, db)
     web = Path(web_dir) if web_dir is not None else WEB_DIR
     app = FastAPI(title="HomeCinema", docs_url=None, redoc_url=None)
+    app.add_middleware(CrossSiteGuard)
 
     @app.get("/")
     def index():

@@ -78,7 +78,7 @@ def client(tmp_path, cfg, lib, monkeypatch):
                         {"embedded": ["eng"], "external": [], "has_zh": False})
     app = create_app(config=cfg, db=lib, player=Player(lib, cfg, launcher=lambda *a, **k: None),
                      scan_service=ScanService(cfg, lib))
-    with TestClient(app) as tc:
+    with TestClient(app, base_url="http://127.0.0.1") as tc:
         yield tc, lib, cfg, lib.list_movies()[0]["id"]
 
 

@@ -73,7 +73,7 @@ def client(tmp_path, cfg, lib):
     player = Player(lib, cfg, launcher=lambda *a, **k: None)
     app = create_app(config=cfg, db=lib, player=player,
                      scan_service=ScanService(cfg, lib))
-    with TestClient(app) as tc:
+    with TestClient(app, base_url="http://127.0.0.1") as tc:
         yield tc
 
 
@@ -97,7 +97,7 @@ def test_F03_img_null_byte_returns_404_not_500(tmp_path, cfg, lib):
     app = create_app(config=cfg, db=lib, player=player,
                      scan_service=ScanService(cfg, lib))
     # raise_server_exceptions=False 才能看到真实客户端拿到的 500 响应
-    with TestClient(app, raise_server_exceptions=False) as tc:
+    with TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False) as tc:
         assert tc.get("/img/abc.jpg").status_code == 200
         assert tc.get("/img/abc%00.jpg").status_code == 404
 

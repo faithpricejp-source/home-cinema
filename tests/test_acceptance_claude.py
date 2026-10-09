@@ -185,7 +185,7 @@ def test_list_payloads_have_href(tmp_path, cfg, lib):
     p.mkdir(parents=True)
     (p / "Sample Show S01E01.mkv").write_bytes(b"x")
     run_scan(cfg, lib)
-    c = TestClient(create_app(config=cfg, db=lib))
+    c = TestClient(create_app(config=cfg, db=lib), base_url="http://127.0.0.1")
     home = c.get("/api/home").json()
     for item in home["movies"] + home["shows"] + home["recently_added"] + c.get("/api/movies").json() + c.get("/api/shows").json():
         assert item["href"].startswith(("#/movie/", "#/show/"))

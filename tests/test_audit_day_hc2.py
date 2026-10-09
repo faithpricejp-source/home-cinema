@@ -196,7 +196,7 @@ def no_probe(monkeypatch):
 def client(cfg, lib, no_probe):
     player = Player(lib, cfg, launcher=lambda *a, **k: None)
     app = create_app(config=cfg, db=lib, player=player, scan_service=ScanService(cfg, lib))
-    with TestClient(app) as tc:
+    with TestClient(app, base_url="http://127.0.0.1") as tc:
         yield tc
 
 

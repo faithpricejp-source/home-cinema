@@ -23,7 +23,7 @@ def client(tmp_path, cfg, lib):
 
     player = Player(lib, cfg, launcher=lambda *a, **k: None)
     app = create_app(config=cfg, db=lib, player=player, scan_service=ScanService(cfg, lib))
-    with TestClient(app) as tc:
+    with TestClient(app, base_url="http://127.0.0.1") as tc:
         tc.lib = lib  # type: ignore[attr-defined]
         yield tc
 

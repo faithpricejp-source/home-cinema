@@ -43,7 +43,7 @@ def client(tmp_path, cfg, lib):
 
     player = Player(lib, cfg, launcher=launcher, poll_interval=0.05, connect_deadline=1.0)
     app = create_app(config=cfg, db=lib, player=player, scan_service=ScanService(cfg, lib))
-    with TestClient(app) as tc:
+    with TestClient(app, base_url="http://127.0.0.1") as tc:
         tc.captured = captured  # type: ignore[attr-defined]
         yield tc
 
@@ -156,7 +156,7 @@ def test_play_episode_and_continue_watching(client):
 
 
 def test_scan_endpoints(client):
-    resp = client.post("/api/scan")
+    resp = client.post("/api/scan", json={})
     assert resp.status_code == 200 and resp.json()["ok"] is True
     status = wait_until(lambda: (lambda s: s if not s["running"] else None)(
         client.get("/api/scan/status").json()), timeout=10)

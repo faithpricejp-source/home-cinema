@@ -266,7 +266,7 @@ def rec_client(cfg, lib):
                     poll_interval=0.05, connect_deadline=1.0)
     app = create_app(config=cfg, db=lib, player=player,
                      scan_service=ScanService(cfg, lib), rec_service=RecService(cfg, lib))
-    with TestClient(app) as tc:
+    with TestClient(app, base_url="http://127.0.0.1") as tc:
         yield tc
 
 
@@ -292,7 +292,7 @@ def test_api_dismiss(rec_client, lib):
 
 
 def test_api_refresh_without_key_409(rec_client):
-    resp = rec_client.post("/api/recommendations/refresh")
+    resp = rec_client.post("/api/recommendations/refresh", json={})
     assert resp.status_code == 409
     assert "TMDB" in resp.json()["detail"]
 

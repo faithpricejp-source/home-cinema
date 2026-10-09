@@ -65,7 +65,7 @@ def env(tmp_path, cfg, lib):
     player = Player(lib, cfg, launcher=lambda *a, **k: None)
     app = create_app(config=cfg, db=lib, player=player, scan_service=ScanService(cfg, lib),
                      airing_service=AiringService(cfg, lib, client_factory=lambda: tmdb))
-    with TestClient(app) as tc:
+    with TestClient(app, base_url="http://127.0.0.1") as tc:
         yield tc, lib, {"m1": m1["id"], "m2": m2["id"], "show": show["id"]}, tmdb
 
 
@@ -129,7 +129,7 @@ def test_missing_episodes_capped_by_next_air_and_calendar(env):
 def test_calendar_refresh_skips_credits(env):
     tc, lib, ids, tmdb = env
     tmdb.calls.clear()
-    assert tc.post("/api/calendar/refresh").status_code in (200, 409)
+    assert tc.post("/api/calendar/refresh", json={}).status_code in (200, 409)
 
 
 def test_multi_episode_file_not_counted_missing(lib):

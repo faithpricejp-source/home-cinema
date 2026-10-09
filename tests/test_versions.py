@@ -152,7 +152,7 @@ def client(cfg, lib, lib2):
 
     player = Player(lib, cfg, launcher=launcher, poll_interval=0.05, connect_deadline=1.0)
     app = create_app(config=cfg, db=lib, player=player, scan_service=ScanService(cfg, lib))
-    with TestClient(app) as tc:
+    with TestClient(app, base_url="http://127.0.0.1") as tc:
         yield tc
 
 
