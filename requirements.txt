@@ -1,0 +1,11 @@
+# 运行依赖（只列 homecinema/ 里真的 import 的第三方包；Python ≥ 3.11，需要标准库 tomllib）
+fastapi                      # server.py：网页服务与 /api 路由（含 StaticFiles、FileResponse）
+pydantic                     # server.py：请求体模型 BaseModel（fastapi 自带，但代码直接 import）
+uvicorn                      # __main__.py serve：起 HTTP 服务
+httpx                        # metadata.py / subtitles.py / community.py / server.py：TMDB、字幕站、社区片段库请求
+opencc-python-reimplemented  # db.py：搜索时繁转简（可选，没装就不转）
+numpy                        # segments.py / ocr_credits.py：声纹比对、截帧像素处理
+pillow                       # ocr_credits.py：片尾截帧读图
+# ocr_credits.py：片尾文字识别用 macOS Vision（仅 macOS；其他平台跳过这一功能）
+pyobjc-framework-Vision; sys_platform == "darwin"
+pyobjc-framework-Quartz; sys_platform == "darwin"

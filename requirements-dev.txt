@@ -1,0 +1,3 @@
+# 开发/测试依赖：pip install -r requirements-dev.txt
+-r requirements.txt
+pytest                       # tests/：全部测试（含 unittest 风格的 tests/segments_algo）

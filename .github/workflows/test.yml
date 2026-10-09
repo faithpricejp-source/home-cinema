@@ -1,0 +1,63 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      # 系统工具：
+      # - ffmpeg（含 ffprobe）：tests/segments_algo 用它合成测试音频、segments.py 用它解码
+      # - libchromaprint-tools（fpcalc）：segments.py 取音频声纹
+      # 不装 libmpv / IINA：Python 侧只经 IINA 命令行 + mpv IPC 播放，测试全用假启动器与假 socket；
+      # libmpv 只在 macapp/ 的 Swift 外壳里用，不在 Python 测试范围内
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q -rs tests
+
+  frontend:
+    name: frontend (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # tests/frontend/*.js：假 DOM + 假 XHR，只用 Node 内置模块，无 npm 依赖
+      - name: Run frontend scripts
+        run: |
+          set -e
+          for f in tests/frontend/*.js; do
+            echo "::group::$f"
+            node "$f"
+            echo "::endgroup::"
+          done

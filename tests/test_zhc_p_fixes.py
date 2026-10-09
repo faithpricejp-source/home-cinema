@@ -21,6 +21,10 @@ import pytest
 PROJECT = Path(__file__).resolve().parent.parent
 AUTO_SCAN = PROJECT / "tools" / "auto_scan.sh"
 REAL_LOCK = Path("/tmp/homecinema-autoscan.lock")
+# auto_scan.sh 是 launchd 用的 macOS 脚本：#!/bin/zsh + BSD `stat -f %m`（GNU stat 的 -f 是查文件系统），
+# 在 Linux 上算不出锁龄，P-1 三条只在 macOS 上有意义
+needs_macos_auto_scan = pytest.mark.skipif(sys.platform != "darwin",
+                                           reason="tools/auto_scan.sh 依赖 macOS 的 zsh + BSD stat -f %m")
 
 
 def load_tool(name: str):
@@ -68,6 +72,7 @@ def live_pid():
     p.wait()
 
 
+@needs_macos_auto_scan
 def test_p1_stale_lock_without_pid_is_reclaimed(tmp_path, guard_real_lock):
     lock = tmp_path / "autoscan.lock"
     lock.mkdir()  # 模拟持锁中被 SIGKILL 的残留（旧脚本连 pid 都不写）
@@ -77,6 +82,7 @@ def test_p1_stale_lock_without_pid_is_reclaimed(tmp_path, guard_real_lock):
     assert (not lock.exists()) or (lock / "pid").exists()
 
 
+@needs_macos_auto_scan
 def test_p1_live_lock_is_respected(tmp_path, live_pid, guard_real_lock):
     lock = tmp_path / "autoscan.lock"
     lock.mkdir()
@@ -86,6 +92,7 @@ def test_p1_live_lock_is_respected(tmp_path, live_pid, guard_real_lock):
     assert (lock / "pid").read_text().strip() == str(live_pid)  # 且不许偷活锁
 
 
+@needs_macos_auto_scan
 def test_p1_stale_lock_by_age_is_reclaimed(tmp_path, live_pid, guard_real_lock):
     lock = tmp_path / "autoscan.lock"
     lock.mkdir()
