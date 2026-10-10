@@ -67,6 +67,16 @@ def test_unmatched_files_each_keep_own_card(lib):
     assert all(g["count"] == 1 for g in lib.list_movie_groups() if g["row"]["tmdb_id"] is None)
 
 
+def test_unfavorite_from_other_version_clears_movie_group(cfg, lib, lib2):
+    lib.set_favorite("movie", lib2["a"], True)
+    with TestClient(create_app(config=cfg, db=lib), base_url="http://127.0.0.1") as client:
+        assert client.get(f'/api/movie/{lib2["b"]}').json()["favorite"] is True
+        response = client.post("/api/favorite", json={"type": "movie", "id": lib2["b"], "favorite": False})
+        assert response.status_code == 200
+        assert client.get(f'/api/movie/{lib2["b"]}').json()["favorite"] is False
+        assert client.get('/api/movies?fav=true').json() == []
+
+
 def test_search_and_sort_dedup(lib, lib2):
     groups = lib.list_movie_groups(q="watchmen")
     assert [(g["row"]["id"], g["count"]) for g in groups] == [(lib2["b"], 2)]

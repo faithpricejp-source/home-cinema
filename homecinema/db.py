@@ -739,7 +739,12 @@ class Library:
             if favorite:
                 self._conn.execute("INSERT INTO favorites (item_type, item_id, added_at) VALUES (?, ?, ?) ON CONFLICT(item_type, item_id) DO NOTHING", (item_type, item_id, utcnow()))
             else:
-                self._conn.execute("DELETE FROM favorites WHERE item_type=? AND item_id=?", (item_type, item_id))
+                if item_type == "movie":
+                    self._conn.execute("DELETE FROM favorites WHERE item_type='movie' AND item_id IN "
+                                       "(SELECT id FROM movies WHERE id=? OR tmdb_id="
+                                       "(SELECT tmdb_id FROM movies WHERE id=?))", (item_id, item_id))
+                else:
+                    self._conn.execute("DELETE FROM favorites WHERE item_type=? AND item_id=?", (item_type, item_id))
             self._conn.commit()
         return True
 

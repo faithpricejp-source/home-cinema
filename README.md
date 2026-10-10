@@ -192,3 +192,8 @@ App 菜单「显示 → 跳过片头片尾」是总开关（默认开，记在 U
 ## License
 
 GPL-3.0（App 链接 GPL 构建的 libmpv）。
+
+
+## 2026-10-10 fixes
+
+Unfavoriting a movie clears favorites across its file versions, matching the grouped display. Regression: 385 passed, 5 expected failures, 64 subtests passed.
